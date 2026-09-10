@@ -30,5 +30,8 @@ Every extension in `extensions/` with owner, role, and status. Core = default ro
 | `btw` | Side questions (lighter) | opt-in |
 | `preview` | Rendered preview | opt-in |
 | `web` | Web search/fetch | opt-in |
-
 `_pi-extensions/` holds live Pi-side fragments (rtk config, vision handoff json) — not packages.
+
+> `safety-net` ships only a prebuilt `dist/` bundle (no source vendored) — its
+> entry point is `./dist/pi/index.js`. Do not prune it; re-vendor or drop the
+> package deliberately if it ever goes stale.
