@@ -1,0 +1,19 @@
+{
+  "name": "bash-interceptor",
+  "version": "0.1.0",
+  "description": "Craft-harness extension. Intercepts bash/powershell calls and redirects file/search ops to dedicated Pi tools.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./bash-interceptor.ts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./bash-interceptor.ts"
+    ]
+  }
+}

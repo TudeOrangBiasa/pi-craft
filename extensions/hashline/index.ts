@@ -1,0 +1,179 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
+import { initHasher } from "./src/hashline";
+import { regReplace } from "./src/replace";
+import { regInsert } from "./src/insert";
+import { regGrep } from "./src/grep";
+import { regUndo, clearUndo } from "./src/replace-undo";
+import { regRead, fmtReadPreview } from "./src/read";
+import type { RMetrics } from "./src/replace-response";
+import { extractWarnings } from "./src/replace-render";
+import { MAX_HASH_LINES } from "./src/hashline";
+import {
+  readConfig,
+  toggleAutoRead,
+  toggleAnchorGrep,
+} from "./src/config";
+import { loadHashStore, pruneMissing } from "./src/hash-store";
+import { recordServedSafe, clearServed, buildServedMap } from "./src/served";
+import { clearBoundaryBypass } from "./src/boundary-bypass";
+import { registerWriteHook } from "./src/write-hook";
+import { readNormFile } from "./src/file-reader";
+import { loadFileKindAndText } from "./src/file-kind";
+import { resolveInCwd } from "./src/fs-write";
+import { valAccess } from "./src/validation";
+import { splitLines } from "./src/utils";
+
+export default function (pi: ExtensionAPI): void {
+  regRead(pi);
+
+  regReplace(pi);
+  regInsert(pi);
+  regGrep(pi);
+  regUndo(pi);
+  registerWriteHook(pi);
+
+  let autoRead = true;
+  // Core tools displaced by our discipline (ffgrep > grep, fffind > find,
+  // read > ls, replace/insert > edit). Stripped unconditionally at startup —
+  // ffgrep/fffind/read are the routed primaries. Core `read` is SPARED:
+  // it shares the name with our read and Pi tolerates exactly one winner
+  // today; name-filtering could remove the winner and break anchors.
+  const DISPLACED_CORE_TOOLS = ["edit", "grep", "find", "ls"];
+  pi.on("session_start", async (_event, ctx) => {
+    const active = pi.getActiveTools();
+    pi.setActiveTools(active.filter((t) => !DISPLACED_CORE_TOOLS.includes(t)));
+    await initHasher();
+    loadHashStore()
+      .then(store =>
+        pruneMissing(store).catch(err => {
+          console.error("Failed to prune hash store:", err);
+        }),
+      )
+      .catch(err => {
+        console.error("Failed to load hash store:", err);
+      });
+    const config = await readConfig();
+    autoRead = config.autoRead;
+    if (!config.anchorGrepEnabled) {
+      pi.setActiveTools(pi.getActiveTools().filter((t) => t !== "anchor_grep"));
+    }
+    const debugValue = process.env.PI_HASHLINE_DEBUG;
+    if (debugValue === "1" || debugValue === "true") {
+      ctx.ui.notify(`Hashline Edit mode active`, "info");
+    }
+  });
+
+  pi.registerCommand("toggle-auto-read", {
+    description: "Toggle auto-read anchors after write and post-edit diffs after replace, insert, and undo_last_change",
+    handler: async (_args, ctx) => {
+      autoRead = await toggleAutoRead();
+      const state = autoRead ? "enabled" : "disabled";
+      ctx.ui.notify(`Auto-read anchors after write and post-edit diffs after replace/undo: ${state}`, "info");
+    },
+  });
+
+  pi.registerCommand("toggle-anchor-grep", {
+    description: "Enable or disable the anchor_grep tool (core grep stays displaced; ffgrep is the fallback)",
+    handler: async (_args, ctx) => {
+      const enabled = await toggleAnchorGrep();
+      const active = pi.getActiveTools();
+      pi.setActiveTools(
+        enabled
+          ? [...new Set([...active, "anchor_grep"])]
+          : active.filter((t) => t !== "anchor_grep"),
+      );
+      const state = enabled ? "enabled" : "disabled";
+      ctx.ui.notify(`anchor_grep tool ${state}`, "info");
+    },
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.isError) return;
+
+    if (event.toolName === "write") {
+      const writtenPath = (event.input as Record<string, unknown>)?.path;
+      let resolvedPath: string | undefined;
+      if (typeof writtenPath === "string") {
+        try {
+          resolvedPath = (await resolveInCwd(writtenPath, ctx.cwd)).resolved;
+          await clearUndo(resolvedPath);
+          clearBoundaryBypass(resolvedPath);
+          const store = await loadHashStore();
+          clearServed(store, resolvedPath);
+        } catch (error) {
+          console.error("Failed to clear undo after write:", error);
+        }
+      }
+      if (!autoRead) return;
+      if (typeof writtenPath !== "string") return;
+      try {
+        resolvedPath ??= (await resolveInCwd(writtenPath, ctx.cwd)).resolved;
+        await valAccess(resolvedPath, writtenPath);
+        const file = await loadFileKindAndText(resolvedPath, { maxLines: MAX_HASH_LINES, displayPath: writtenPath });
+        if (file.kind !== "text") return;
+        const { normalized, fileHashes, absolutePath } = await readNormFile(
+          writtenPath, ctx.cwd, { maxLines: MAX_HASH_LINES, preloadedFile: file },
+        );
+        const preview = await fmtReadPreview(
+          normalized,
+          {},
+          fileHashes,
+          absolutePath,
+          DEFAULT_MAX_BYTES,
+          DEFAULT_MAX_LINES,
+        );
+        const fileLines = splitLines(normalized);
+        const servedMap = buildServedMap(fileHashes, fileLines, preview.servedHashes);
+        await recordServedSafe(absolutePath, servedMap, "auto-read", new Set(fileHashes));
+        return {
+          content: [
+            ...(event.content ?? []),
+            { type: "text", text: `\n\n--- Auto-read (hashline anchors) ---\n${preview.text}` },
+          ],
+        };
+      } catch (error) {
+        console.error("Auto-read after write failed:", error);
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [
+            ...(event.content ?? []),
+            { type: "text", text: `\n\n--- Auto-read failed: ${message} ---` },
+          ],
+        };
+      }
+    }
+
+    if (
+      event.toolName !== "replace" &&
+      event.toolName !== "insert" &&
+      event.toolName !== "undo_last_change"
+    ) return;
+    if (!autoRead) return;
+
+    const metrics = (event.details as { metrics?: RMetrics } | undefined)?.metrics;
+    if (metrics?.classification === "noop") return;
+
+    const diff = (event.details as { diff?: string } | undefined)?.diff;
+    if (typeof diff !== "string") return;
+    const hasDiff = diff.length > 0;
+
+    const rendered = (event.content ?? [])
+      .filter(
+        (entry): entry is { type: "text"; text: string } =>
+          entry.type === "text" && typeof entry.text === "string",
+      )
+      .map((entry) => entry.text)
+      .join("\n");
+    const warnings = extractWarnings(rendered);
+    const hint = hasDiff ? (warnings ? `${diff}\n\n${warnings}` : diff) : warnings ? `[post-edit] applied successfully; the diff is empty (whitespace-only change).\n\n${warnings}` : "[post-edit] applied successfully; the diff is empty (whitespace-only change).";
+    return {
+      content: [
+        {
+          type: "text",
+          text: hint,
+        },
+      ],
+    };
+  });
+}

@@ -1,0 +1,2 @@
+- `undo_last_change`: only the last `replace`/`insert` per file can be undone; a successful `write` clears it, so call immediately after a bad diff (look for `-anchor│` lines you wanted to keep).
+- `undo_last_change`: if the file changed after the edit you get `[E_UNDO_STALE]` — the record is kept, so undo again after the file matches the edited state; if the file was deleted it is restored.

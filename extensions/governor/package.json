@@ -1,0 +1,19 @@
+{
+  "name": "governor",
+  "version": "0.1.0",
+  "description": "Craft-harness extension. Caps runaway tool output (500 lines / 50KB ceiling) with tail + notice.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./governor.ts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./governor.ts"
+    ]
+  }
+}

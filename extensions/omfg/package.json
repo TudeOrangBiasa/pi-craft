@@ -1,0 +1,19 @@
+{
+  "name": "omfg",
+  "version": "0.1.0",
+  "description": "Craft-harness extension. Opinionated output filter gate with vendored guidance rules.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./omfg.ts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./omfg.ts"
+    ]
+  }
+}

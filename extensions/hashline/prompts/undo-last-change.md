@@ -1,0 +1,1 @@
+Undo the last `replace` or `insert` on a file, restoring previous content, BOM and line endings. Use after a bad edit when the diff showed wrong lines removed. If the file was deleted, it is restored; if changed elsewhere, you get `[E_UNDO_STALE]` and the record is kept so you can retry after restoring the edited state. If output says truncated, use `read` to see full file.

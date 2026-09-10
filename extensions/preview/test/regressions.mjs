@@ -1,0 +1,2136 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve, win32 as win32Path } from "node:path";
+import { pathToFileURL } from "node:url";
+import puppeteer from "puppeteer-core";
+import ts from "typescript";
+import { Check } from "typebox/value";
+import { BoundedProcessError, buildWindowsCmdCommandLine, isSpawnNotFoundError, runBoundedProcess } from "../shared/bounded-process.js";
+import {
+	createBrowserWatchServer,
+	getBrowserWatchAbsoluteImagePath,
+	getBrowserWatchLocalMediaPath,
+	prepareBrowserWatchHtml,
+	resolveBrowserWatchResource,
+	rewriteBrowserWatchAbsoluteImageSources,
+	rewriteBrowserWatchLocalMediaSources,
+} from "../shared/browser-watch-server.js";
+import {
+	stripMarkdownHtmlComments,
+	stripMarkdownHtmlCommentsPreservingYamlFrontMatter,
+} from "../shared/markdown-html-comments.js";
+
+const sourcePath = resolve(process.cwd(), "index.ts");
+const src = readFileSync(sourcePath, "utf-8");
+const boundedProcessSrc = readFileSync(resolve(process.cwd(), "shared", "bounded-process.js"), "utf-8");
+const browserWatchServerSrc = readFileSync(resolve(process.cwd(), "shared", "browser-watch-server.js"), "utf-8");
+const pdfFigureRendererSrc = readFileSync(resolve(process.cwd(), "client", "pdf-figure-renderer.js"), "utf-8");
+assert.match(boundedProcessSrc, /child\.stdout\.on\("error"/);
+assert.match(boundedProcessSrc, /child\.stderr\.on\("error"/);
+assert.match(boundedProcessSrc, /process\.kill\(-processId, "SIGKILL"\)/, "POSIX cancellation should terminate the child process group.");
+assert.match(boundedProcessSrc, /spawnSync\("taskkill", \["\/pid", String\(processId\), "\/T", "\/F"\]/, "Windows cancellation should terminate the child process tree.");
+assert.equal(
+	buildWindowsCmdCommandLine("C:\\Program Files\\Pandoc & Tools\\pandoc.cmd", ["--output", "C:\\Preview Files\\result | final.pdf"]),
+	'""C:\\Program Files\\Pandoc & Tools\\pandoc.cmd" "--output" "C:\\Preview Files\\result | final.pdf""',
+	"Windows command-shim invocation should quote every argument and preserve shell metacharacters literally.",
+);
+assert.throws(() => buildWindowsCmdCommandLine("pandoc.cmd", ["%TEMP%\\result.pdf"]), /percent expansion/);
+assert.match(pdfFigureRendererSrc, /documentProxy\.numPages !== 1/, "Only single-page PDFs should replace native embeds.");
+assert.match(pdfFigureRendererSrc, /embed\.replaceWith\(buildRenderedFigure/, "A successfully rendered PDF should replace its embed atomically.");
+assert.match(pdfFigureRendererSrc, /isEvalSupported: false/g, "PDF.js should not evaluate PDF-defined JavaScript while rendering figures.");
+assert.match(pdfFigureRendererSrc, /MAX_TOTAL_CANVAS_PIXELS = 32 \* 1024 \* 1024/, "PDF canvases should have an aggregate browser-memory bound.");
+assert.match(pdfFigureRendererSrc, /for \(let index = 0; index < embeds\.length; index \+= 1\)/, "PDF figures should render sequentially rather than allocating every canvas concurrently.");
+assert.ok(
+	browserWatchServerSrc.includes('req.once("aborted", destroyStream)')
+		&& browserWatchServerSrc.includes('res.once("close", destroyStream)')
+		&& browserWatchServerSrc.includes("if (req.aborted || res.destroyed || res.writableEnded) return;"),
+	"Cancelled PDF.js resource requests should close their source file streams.",
+);
+
+const boundedProcessOptions = (overrides = {}) => ({
+	label: "regression child",
+	maxStderrBytes: 1024,
+	maxStdoutBytes: 1024,
+	timeoutMs: 5000,
+	...overrides,
+});
+const boundedSuccess = await runBoundedProcess(
+	process.execPath,
+	["-e", "process.stdout.write('out'); process.stderr.write('err')"],
+	boundedProcessOptions(),
+);
+assert.equal(boundedSuccess.code, 0);
+assert.equal(boundedSuccess.stdout.toString("utf8"), "out");
+assert.equal(boundedSuccess.stderr.toString("utf8"), "err");
+const earlyExit = await runBoundedProcess(
+	process.execPath,
+	["-e", "process.exit(7)"],
+	boundedProcessOptions({ input: Buffer.alloc(8 * 1024 * 1024) }),
+);
+assert.equal(earlyExit.code, 7, "An early child exit should report its status without an unhandled stdin EPIPE.");
+const closesStdinSuccessfully = () => runBoundedProcess(
+	process.execPath,
+	["-e", "process.stdin.destroy(); process.exit(0)"],
+	boundedProcessOptions({ input: Buffer.alloc(8 * 1024 * 1024) }),
+);
+if (process.versions.bun) {
+	// Bun currently reports a successful stdin flush when the child closes without
+	// reading; ensure the compatibility runtime at least observes the stream and
+	// does not crash. Real Pandoc consumes its input before returning success.
+	await closesStdinSuccessfully();
+} else {
+	await assert.rejects(
+		closesStdinSuccessfully(),
+		(error) => error instanceof BoundedProcessError && error.kind === "stdin",
+		"A child must not report success after closing stdin before its full input was delivered.",
+	);
+}
+await assert.rejects(
+	runBoundedProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], boundedProcessOptions({ timeoutMs: 30 })),
+	(error) => error instanceof BoundedProcessError && error.kind === "timeout",
+	"Bounded subprocesses should be killed at their deadline.",
+);
+const descendantMarker = join(tmpdir(), `pi-markdown-preview-descendant-${process.pid}-${Date.now()}`);
+await rm(descendantMarker, { force: true });
+let treeCommand;
+let treeArgs;
+if (process.platform === "win32") {
+	const descendantSource = `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(descendantMarker)}, 'survived'), 500)`;
+	const parentSource = [
+		"const { spawn } = require('node:child_process');",
+		`const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantSource)}], { stdio: 'inherit' });`,
+		"child.unref();",
+		"setInterval(() => {}, 1000);",
+	].join(" ");
+	treeCommand = process.execPath;
+	treeArgs = ["-e", parentSource];
+} else {
+	treeCommand = "/bin/sh";
+	treeArgs = [
+		"-c",
+		'(sleep 0.5; printf survived > "$1") & exit 0',
+		"bounded-process-tree",
+		descendantMarker,
+	];
+}
+await assert.rejects(
+	runBoundedProcess(treeCommand, treeArgs, boundedProcessOptions({ timeoutMs: 150 })),
+	(error) => error instanceof BoundedProcessError && error.kind === "timeout",
+	"Terminating a bounded process should terminate its subprocess tree.",
+);
+await new Promise((resolvePromise) => setTimeout(resolvePromise, 650));
+assert.equal(existsSync(descendantMarker), false, "A timed-out process must not leave a descendant running after its parent is killed.");
+await rm(descendantMarker, { force: true });
+const abortController = new AbortController();
+const abortedProcess = runBoundedProcess(
+	process.execPath,
+	["-e", "setInterval(() => {}, 1000)"],
+	boundedProcessOptions({ signal: abortController.signal }),
+);
+abortController.abort();
+await assert.rejects(
+	abortedProcess,
+	(error) => error instanceof BoundedProcessError && error.kind === "aborted",
+	"Bounded subprocesses should honor cancellation.",
+);
+await assert.rejects(
+	runBoundedProcess(process.execPath, ["-e", "process.stdout.write('x'.repeat(2048))"], boundedProcessOptions()),
+	(error) => error instanceof BoundedProcessError && error.kind === "stdout-limit",
+	"Bounded subprocesses should reject oversized stdout.",
+);
+await assert.rejects(
+	runBoundedProcess(process.execPath, ["-e", "process.stderr.write('x'.repeat(2048))"], boundedProcessOptions()),
+	(error) => error instanceof BoundedProcessError && error.kind === "stderr-limit",
+	"Bounded subprocesses should reject oversized stderr.",
+);
+await assert.rejects(
+	runBoundedProcess(join(tmpdir(), "pi-markdown-preview-missing-command"), [], boundedProcessOptions()),
+	(error) => isSpawnNotFoundError(error),
+	"Spawn failures should preserve ENOENT for actionable Pandoc guidance.",
+);
+
+assert.doesNotMatch(
+	src,
+	/import\s*\{[^}]*\ballocateImageId\b[^}]*\}\s*from\s*"@earendil-works\/pi-tui"/s,
+	"allocateImageId must not be a named runtime import because compatible host shims may omit it.",
+);
+assert.ok(
+	src.includes('import * as PiTuiCompat from "@earendil-works/pi-tui";')
+		&& src.includes('typeof PiTuiCompat.allocateImageId === "function"')
+		&& src.includes("allocateImageIdIfAvailable?.()"),
+	"Kitty image IDs should be feature-detected and omitted when the host does not expose an allocator.",
+);
+const stringEnumSource = src.slice(src.indexOf("function stringEnum"), src.indexOf("type ThemeMode"));
+assert.ok(
+	stringEnumSource.includes("return Type.String({") && !stringEnumSource.includes("return Type.Unsafe({"),
+	"String enums should remain composable with Type.Optional in compatible host schema implementations.",
+);
+
+assert.match(src, /function buildRenderCacheKey\s*\(/, "Missing buildRenderCacheKey helper.");
+assert.match(
+	src,
+	/const DEFAULT_TERMINAL_PREVIEW_FONT_SIZE_PX = 16;/,
+	"Terminal preview should keep the known-good crisp default font size.",
+);
+assert.match(
+	src,
+	/const DEFAULT_BROWSER_PREVIEW_FONT_SIZE_PX = 15;/,
+	"Browser preview default font size should match Studio's compact markdown rendering.",
+);
+assert.ok(
+	src.includes("watchFile(filePath, { interval: BROWSER_FILE_WATCH_INTERVAL_MS }, listener)")
+		&& src.includes("unwatchFile(source.filePath, source.listener)")
+		&& src.includes("appendToHistory: snapshot.contentHash !== activeWatch.source.lastContentHash")
+		&& src.includes("activeWatch.source.refreshSequence !== refreshSequence")
+		&& src.includes("scheduleBrowserFileWatchRefresh(ctx, activeWatch);")
+		&& src.includes("const browserWatches = new Map<BrowserWatchId, BrowserWatchState>();")
+		&& src.includes("const pendingBrowserWatchCleanups = new Map<BrowserWatchId, BrowserWatchCleanupResource[]>();")
+		&& src.includes("const canonicalPath = await realpath(filePath);")
+		&& src.includes("const MAX_BROWSER_WATCHES = 8;")
+		&& src.includes("if (activeWatch.renderInFlight) return activeWatch.renderInFlight;")
+		&& src.includes("if (responseOverride !== undefined) responseSource.queuedResponseOverride = responseOverride;")
+		&& src.includes("readBrowserFileWatchSnapshot(activeWatch.source.filePath, renderController.signal)")
+		&& src.includes("readBrowserFileWatchSnapshot(filePath, renderController.signal)"),
+	"Browser file watch should isolate canonical paths, retain failed cleanup ownership, coalesce rendering, preserve explicit response fallbacks, and cancel both active and provisional reads.",
+);
+assert.match(
+	src,
+	/const DEFAULT_TERMINAL_DEVICE_SCALE_FACTOR = 2;/,
+	"Terminal preview should keep the known-good screenshot density.",
+);
+assert.match(
+	src,
+	/const cacheKey = buildRenderCacheKey\(`\$\{style\.cacheKey\}\|fontSize=\$\{previewFontSizePx\}\|scale=\$\{deviceScaleFactor\}`,[\s\S]*?resourcePath,[\s\S]*?isLatex\)/,
+	"renderPreview should scope cache by style/resourcePath/isLatex/fontSize/deviceScaleFactor.",
+);
+assert.ok(
+	src.includes("truncatedPages: cached.truncatedPages === true")
+		&& src.includes("truncatedPages: index === 0 ? truncatedPages : undefined"),
+	"Preview caches should preserve maximum-height truncation warnings.",
+);
+
+assert.match(
+	src,
+	/markdown\+lists_without_preceding_blankline-blank_before_blockquote-blank_before_header\+tex_math_dollars\+autolink_bare_uris-raw_html-raw_attribute/,
+	"HTML preview input format should allow lists, blockquotes, and headings without a preceding blank line and disable raw HTML, including raw attributed blocks.",
+);
+assert.match(
+	src,
+	/\["-f", inputFormat, "-t", "html5", "--mathml", "--wrap=none"\]/,
+	"HTML preview should pass --wrap=none so long annotation markers survive pandoc wrapping.",
+);
+assert.match(src, /const PANDOC_FIGURE_CROSSREF_FILTER_PATH = fileURLToPath\(new URL\("\.\/shared\/pandoc-figure-crossrefs\.lua", import\.meta\.url\)\);/);
+assert.equal((src.match(/--lua-filter=\$\{PANDOC_FIGURE_CROSSREF_FILTER_PATH\}/g) ?? []).length, 3, "HTML and both Markdown-to-PDF paths should use the trusted lightweight figure-reference filter.");
+assert.match(src, /if \(!isLatex\) args\.push\(`--lua-filter=\$\{PANDOC_FIGURE_CROSSREF_FILTER_PATH\}`\);/, "Direct LaTeX input must not pass through the Markdown figure-reference filter.");
+assert.match(
+	src,
+	/markdown\+lists_without_preceding_blankline-blank_before_blockquote-blank_before_header\+tex_math_dollars\+autolink_bare_uris\+superscript\+subscript-raw_html-raw_attribute/,
+	"PDF input format should allow lists, blockquotes, and headings without a preceding blank line and disable raw HTML/raw attributed blocks.",
+);
+assert.ok(
+	src.includes(String.raw`\\IfFileExists{titlesec.sty}`) && src.includes(String.raw`\\IfFileExists{enumitem.sty}`),
+	"PDF preamble should make cosmetic heading/list packages optional.",
+);
+assert.ok(
+	src.includes(String.raw`\\IfFileExists{varwidth.sty}`) && src.includes(String.raw`\\parbox{\\dimexpr\\linewidth-2\\fboxsep-2\\fboxrule\\relax}`),
+	"PDF annotation boxes should use varwidth when available and a parbox fallback otherwise.",
+);
+assert.ok(
+	src.includes(String.raw`\\newcommand{\\piannotation}[1]{%`) && src.includes(String.raw`\\fcolorbox{PiAnnotationBorder}{PiAnnotationBg}{%`),
+	"PDF annotation macro should use a boxed annotation style instead of raw soul highlighting.",
+);
+assert.ok(
+	src.includes(String.raw`\\newcommand{\\PiDiffAddTok}[1]{\\textcolor{PiDiffAddText}{#1}}`),
+	"PDF preamble should define dedicated diff add token colours.",
+);
+assert.ok(
+	src.includes(String.raw`\\IfFileExists{framed.sty}`) &&
+		src.includes(String.raw`\\definecolor{shadecolor}{HTML}{F6F8FA}`) &&
+		src.includes(String.raw`\\renewenvironment{Shaded}{\\begin{snugshade}}{\\end{snugshade}}`),
+	"PDF preamble should add a light code-block background when framed is available.",
+);
+assert.ok(
+	src.includes(String.raw`\\IfFileExists{fvextra.sty}`) && src.includes(String.raw`\\RecustomVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\\\\{\\},breaklines,breakanywhere}`),
+	"PDF preamble should enable wrap-friendly highlighted verbatim blocks when fvextra is available.",
+);
+assert.ok(
+	src.includes("--pdf-engine-opt=-interaction=nonstopmode") && src.includes("--pdf-engine-opt=-halt-on-error"),
+	"PDF export should pass non-interactive LaTeX engine options when using LaTeX engines.",
+);
+assert.match(boundedProcessSrc, /child\.stdout\.on\("data"/, "Render subprocess stdout should be drained and bounded.");
+assert.match(boundedProcessSrc, /child\.stderr\.on\("data"/, "Render subprocess stderr should be drained and bounded.");
+assert.ok(
+	src.includes("PI_MARKDOWN_PREVIEW_PDF_TIMEOUT_MS")
+		&& src.includes('label: "pandoc PDF export"')
+		&& src.includes("runPandocProcess(args, pandocInput"),
+	"PDF export should use the configurable timeout through the bounded Pandoc runner.",
+);
+assert.ok(
+	src.includes("DEFAULT_PANDOC_RENDER_TIMEOUT_MS = 30000")
+		&& src.includes("MAX_RENDER_PROCESS_STDOUT_BYTES = 50 * 1024 * 1024")
+		&& src.includes("MAX_RENDER_PROCESS_STDERR_BYTES = 5 * 1024 * 1024"),
+	"HTML and PDF Pandoc subprocesses should have explicit time and output bounds.",
+);
+assert.ok(
+	src.includes('windowsCmdShim: process.platform === "win32"')
+		&& src.includes("windowsCmdShim: needsWindowsCommandShell(pandocCommand)")
+		&& src.includes("windowsCmdShim: needsWindowsCommandShell(engine)"),
+	"Windows .cmd/.bat wrappers should use a command shell in every bounded render path.",
+);
+assert.ok(
+	src.includes("renderPreviewPdfToFile(input.markdown, outputPath")
+		&& src.includes("}, signal);")
+		&& src.includes("renderPreviewHtmlToFile(input.markdown, style, input.resourcePath, input.isLatex, params.fontSizePx, outputPath, signal)")
+		&& src.includes("await publishArtifactFiles([{ content: rendered.html, filePath: htmlPath }], signal);")
+		&& src.includes("await publishArtifactFiles(paths.map((filePath, index) => ({")
+		&& src.includes("const stagingPath = getArtifactStagingPath(pdfPath);")
+		&& src.includes("throwIfPreviewCancelled(signal);\n\t\t\t\tif (params.open"),
+	"preview_export should propagate cancellation, publish HTML/PDF/PNG through staging files, and refuse to open a cancelled artifact.",
+);
+assert.ok(
+	src.includes("const stagingPath = `${outputPath}.${process.pid}.${randomBytes(6).toString(\"hex\")}.tmp`;")
+		&& src.includes("if (!await hasCompletePdfStructure(renderedPath))")
+		&& src.includes('Buffer.from("%%EOF")')
+		&& src.includes('.update("pdf-mermaid-v2")')
+		&& src.includes("await rename(stagingPath, outputPath);"),
+	"Mermaid PDF cache entries should be validated and published atomically from a staging file.",
+);
+
+assert.match(
+	src,
+	/resolvePath\(ctx\.cwd,\s*expanded\)/,
+	"--file paths should resolve against ctx.cwd.",
+);
+
+assert.match(
+	src,
+	/if \(baseLower === "dockerfile"\) return "dockerfile";/,
+	"Dockerfile basename detection should be supported.",
+);
+assert.match(
+	src,
+	/if \(baseLower === "makefile"\) return "makefile";/,
+	"Makefile basename detection should be supported.",
+);
+assert.match(
+	src,
+	/const MARKDOWN_EXTENSIONS = new Set\(\["md", "markdown", "mdx", "rmd", "qmd"\]\);/,
+	"Markdown extension detection should include .qmd files.",
+);
+
+assert.match(
+	src,
+	/function formatMarkdownImageDestination\s*\(/,
+	"Missing markdown image destination formatter.",
+);
+assert.match(
+	src,
+	/formatMarkdownImageDestination\(path\)/,
+	"Obsidian image normalization should use destination formatter.",
+);
+
+assert.match(
+	src,
+	/resourcePath = ctx\.cwd;/,
+	"Assistant-response previews should resolve relative local images against ctx.cwd.",
+);
+
+assert.match(src, /function getLongestFenceRun\s*\(/, "Missing adaptive fence-length helper.");
+assert.match(src, /function normalizeMarkdownFencedBlocks\s*\(/, "Missing fenced-block normalization helper.");
+assert.match(
+	src,
+	/normalizeMarkdownFencedBlocks\(normalizeObsidianImages\(normalizeMathDelimiters\(markdownWithoutHtmlComments\)\)\)/,
+	"Preview/browser paths should strip HTML comments and normalize fenced blocks before pandoc rendering.",
+);
+assert.match(
+	src,
+	/normalizeSubSupTags\(normalizeMarkdownFencedBlocks\(normalizeObsidianImages\(normalizeMathDelimiters\(markdownWithoutHtmlComments\)\)\)\)/,
+	"PDF export should strip HTML comments and normalize fenced blocks before pandoc rendering.",
+);
+assert.match(src, /stripMarkdownHtmlCommentsPreservingYamlFrontMatter\(markdown\)/, "Markdown previews should remove HTML comments before invoking Pandoc with raw HTML disabled.");
+assert.match(
+	src,
+	/const markerLength = Math\.max\(3, \(markerChar === "`" \? maxBackticks : maxTildes\) \+ 1\);/,
+	"Code-file wrapping should choose a fence longer than any inner fence run.",
+);
+
+assert.match(src, /from "\.\/shared\/annotation-scanner\.js"/, "Markdown preview should import the shared annotation scanner.");
+assert.match(src, /const PREVIEW_ANNOTATION_PLACEHOLDER_PREFIX = "PIMDPREVIEWANNOT";/, "Missing browser preview annotation placeholder prefix.");
+assert.match(src, /const ANNOTATION_HELPERS_SOURCE = readFileSync\(new URL\("\.\/client\/annotation-helpers\.js", import\.meta\.url\), "utf-8"\);/, "Browser preview should embed the annotation helper script.");
+assert.match(src, /function prepareBrowserPreviewMarkdown\s*\(/, "Missing browser preview annotation preparation helper.");
+assert.match(src, /prepareMarkdownForPandocPreview\(normalizedMarkdown, PREVIEW_ANNOTATION_PLACEHOLDER_PREFIX\)/, "Browser preview should replace prose annotations with placeholders before pandoc.");
+assert.match(src, /buildBrowserHtmlFromPandocFragment\(fragmentHtml, style, resourcePath, annotationPlaceholders(?:,\s*(?:previewFontSizePx|fontSizePx))?\)/, "Browser preview HTML builder should receive annotation placeholders.");
+
+assert.match(src, /function escapeLatexText\s*\(/, "Missing PDF annotation LaTeX escaping helper.");
+assert.match(src, /function getMathPattern\s*\(/, "Missing shared PDF annotation math-pattern helper.");
+assert.ok(
+	src.includes(String.raw`return /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$|\$([^$\n]+?)\$/g;`),
+	"PDF annotation escaping should preserve inline and display math segments.",
+);
+assert.match(src, /function renderAnnotationPdfLatex\s*\(/, "Missing markdown-ish PDF annotation renderer.");
+assert.match(src, /function renderAnnotationCodeSpanPdfLatex\s*\(/, "Missing PDF annotation code-span renderer.");
+assert.match(src, /function renderAnnotationPlainTextPdfLatex\s*\(/, "Missing PDF annotation emphasis renderer.");
+assert.match(src, /const cleaned = renderAnnotationPdfLatex\(marker\.body\);/, "PDF prose annotation replacement should use the markdown-ish annotation renderer.");
+assert.match(src, /return transformMarkdownOutsideFences\(markdown, \(segment(?::\s*string)?\) => replaceAnnotationMarkersForPdfInSegment\(segment\)\);/, "PDF prose annotation replacement should transform only markdown outside fences.");
+
+assert.match(src, /function decodeGeneratedLatexCodeText\s*\(/, "Missing generated-LaTeX code-text decode helper.");
+assert.ok(
+	src.includes("decodeGeneratedLatexCodeText")
+		&& src.includes("textbackslash")
+		&& src.includes("textasciigrave")
+		&& src.includes("textasciitilde")
+		&& src.includes("textasciicircum")
+		&& src.includes(String.raw`.replace(/\\\^\{\}/g, "^")`),
+	"Diff annotation PDF rewrite should decode pandoc's escaped code-text sequences before preserving math and inline code spans.",
+);
+assert.match(src, /function readVerbatimMathOperand\s*\(/, "Missing verbatim-safe diff math operand reader.");
+assert.match(src, /function makeHighlightingMathScriptsVerbatimSafe\s*\(/, "Missing verbatim-safe diff math rewrite helper.");
+assert.ok(src.includes("\\sb") && src.includes("\\sp"), "Verbatim-safe diff math should rewrite sub/superscripts via \\sb/\\sp.");
+assert.match(src, /const cleaned = makeHighlightingMathScriptsVerbatimSafe\(renderAnnotationPdfLatex\(markerText\)\);/, "Diff token annotation rewrite should use the markdown-ish PDF annotation renderer plus verbatim-safe math rewrite.");
+assert.match(src, /function replaceAnnotationMarkersInDiffTokenLine\s*\(/, "Missing diff-token annotation rewrite helper.");
+assert.match(src, /function rewriteGeneratedDiffHighlighting\s*\(/, "Missing generated LaTeX diff rewrite helper.");
+assert.match(src, /function renderMarkdownToPdfViaGeneratedLatex\s*\(/, "Missing generated-LaTeX PDF path for diff exports.");
+assert.match(
+	src,
+	/hasMarkdownDiffFence\(markdownForPdf\)/,
+	"PDF export should route diff-containing markdown through the generated-LaTeX rewrite path.",
+);
+
+assert.match(src, /const annotationHelpers = window\.PiMarkdownPreviewAnnotationHelpers \|\| null;/, "Browser preview should use the embedded annotation helper bundle.");
+assert.match(src, /const applyPreviewAnnotationPlaceholders = \(root\) =>/, "Missing browser preview annotation placeholder application helper.");
+assert.match(src, /typeof annotationHelpers\.renderPreviewAnnotationHtml === 'function'/, "Browser preview markers should render safe inline emphasis/code HTML from the helper.");
+assert.match(src, /const decorateDiffCodeBlocks = \(root\) =>/, "Missing diff-preview decoration helper.");
+assert.ok(src.includes("diff-add-line"), "Browser preview should classify added diff lines.");
+assert.ok(src.includes("diff-del-line"), "Browser preview should classify deleted diff lines.");
+assert.ok(src.includes("diff-header-line"), "Browser preview should classify diff header lines.");
+assert.ok(src.includes("diff-meta-line"), "Browser preview should classify diff metadata lines.");
+assert.ok(src.includes("diff-hunk-line"), "Browser preview should classify diff hunk lines.");
+assert.ok(
+	src.includes("if (/^\\\\+(?!\\\\+\\\\+)/.test(text)) {"),
+	"Browser diff styling should avoid misclassifying +++ header lines as added lines.",
+);
+assert.ok(
+	src.includes("} else if (/^-(?!--)/.test(text)) {"),
+	"Browser diff styling should avoid misclassifying --- header lines as deleted lines.",
+);
+assert.match(src, /const renderAnnotationMarkerMath = async \(root\) =>/, "Missing annotation-marker math rendering helper.");
+assert.match(src, /await mathJax\.typesetPromise\(markers\);/, "Browser annotation math rendering should typeset full marker elements so emphasis/code markup survives.");
+
+assert.ok(
+	src.includes("https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"),
+	"Browser/terminal preview should include a MathJax fallback loader for unsupported pandoc math.",
+);
+assert.match(
+	src,
+	/const renderMathFallback = async \(root\) =>/,
+	"Expected targeted MathJax fallback for pandoc-unsupported preview equations.",
+);
+assert.match(
+	src,
+	/await renderMermaid\(\);\s*applyPreviewAnnotationPlaceholders\(root\);\s*decorateDiffCodeBlocks\(root\);\s*await renderAnnotationMarkerMath\(root\);\s*await renderMathFallback\(root\);/s,
+	"Browser preview should apply preview placeholders, decorate diffs, render annotation math, then run general math fallback.",
+);
+
+const annotationFixture = await readFile(new URL("./annotation-markdownish.md", import.meta.url), "utf8");
+const scanner = await import(new URL("../shared/annotation-scanner.js", import.meta.url));
+await import(new URL("../client/annotation-helpers.js", import.meta.url));
+const browserHelpers = globalThis.PiMarkdownPreviewAnnotationHelpers;
+
+assert.ok(browserHelpers, "PiMarkdownPreviewAnnotationHelpers did not load for regression checks.");
+
+assert.deepEqual(
+	scanner.collectInlineAnnotationMarkers("A [an: use [docs](https://example.com/docs)] and [an: prefer `npm test` here] plus `[an: literal]`.").map((marker) => marker.body),
+	["use [docs](https://example.com/docs)", "prefer `npm test` here"],
+	"Shared annotation scanner should keep markdown-ish annotation bodies intact while ignoring inline-code literals.",
+);
+assert.equal(
+	scanner.hasMarkdownAnnotationMarkers("Literal `[an: note]` sample"),
+	false,
+	"Shared annotation scanner should ignore annotation-like inline-code literals.",
+);
+assert.equal(
+	scanner.replaceInlineAnnotationMarkers("Before [an: first] and [an: second [docs](https://example.com/second)].", (marker) => `{ANNOT:${scanner.normalizeAnnotationText(marker.body)}}`),
+	"Before {ANNOT:first} and {ANNOT:second [docs](https://example.com/second)}.",
+	"Shared annotation replacement should preserve nested markdown-ish annotation bodies.",
+);
+const preparedShared = scanner.prepareMarkdownForPandocPreview(annotationFixture, "TESTANNOT");
+assert.equal(preparedShared.placeholders.length, 7, "Shared pandoc-preview preparation should replace all prose annotations outside fences.");
+assert.deepEqual(
+	preparedShared.placeholders.map((entry) => entry.text),
+	[
+		"note",
+		"see https://example.com/docs?a=1&b=2",
+		"use [docs](https://example.com/docs)",
+		"prefer `npm test` here",
+		"keep *focus* and _tone_",
+		"first",
+		"second [docs](https://example.com/second)",
+	],
+	"Shared pandoc-preview preparation should preserve markdown-ish annotation label text.",
+);
+assert.match(
+	preparedShared.markdown,
+	/```md\n\[an: literal \[docs\]\(https:\/\/example\.com\/literal\)\] should stay literal inside fenced code\n```/,
+	"Shared pandoc-preview preparation should leave fenced annotation-like literals untouched.",
+);
+
+assert.deepEqual(
+	browserHelpers.collectInlineAnnotationMarkers("Multiple [an: first] markers [an: second [docs](https://example.com/second)] here.").map((marker) => marker.body),
+	["first", "second [docs](https://example.com/second)"],
+	"Browser annotation helper should parse multiple markdown-ish annotations on one line.",
+);
+assert.equal(
+	browserHelpers.renderPreviewAnnotationHtml("keep *focus* and **tone** plus `npm test`"),
+	"keep <em>focus</em> and <strong>tone</strong> plus <code>npm test</code>",
+	"Browser annotation helper should render safe inline emphasis and code.",
+);
+assert.equal(
+	browserHelpers.renderPreviewAnnotationHtml("use [docs](https://example.com/docs) and https://example.com/docs"),
+	"use [docs](https://example.com/docs) and https://example.com/docs",
+	"Browser annotation helper should not activate links inside annotation badges.",
+);
+const preparedBrowser = browserHelpers.prepareMarkdownForPandocPreview(annotationFixture, "TESTANNOT");
+assert.equal(preparedBrowser.placeholders.length, 7, "Browser annotation helper should prepare preview placeholders for prose annotations.");
+assert.ok(preparedBrowser.markdown.includes("TESTANNOT0TOKEN") && preparedBrowser.markdown.includes("TESTANNOT6TOKEN"), "Browser annotation helper should inject deterministic preview placeholder tokens.");
+assert.equal(
+	browserHelpers.prepareMarkdownForPandocPreview("- `[an: prefer \\`npm test\\` here]`\n- [an: keep *focus* and _tone_!]", "TESTANNOT").placeholders.length,
+	1,
+	"Browser annotation helper should ignore fully inline-code annotation examples without desynchronizing later parsing.",
+);
+
+const transpiledIndexPath = resolve(process.cwd(), `.pi-markdown-preview-registration-test-${process.pid}.mjs`);
+const transpiledIndexOutput = ts.transpileModule(src, {
+	compilerOptions: {
+		module: ts.ModuleKind.ES2022,
+		target: ts.ScriptTarget.ES2022,
+	},
+	fileName: sourcePath,
+}).outputText;
+function exposeTranspiledFunction(transpiledSource, functionName) {
+	for (const prefix of ["async function", "function"]) {
+		const marker = `${prefix} ${functionName}(`;
+		if (!transpiledSource.includes(marker)) continue;
+		return transpiledSource.replace(marker, `export ${marker}`);
+	}
+	assert.fail(`Regression harness could not expose ${functionName}.`);
+}
+
+let transpiledIndex = transpiledIndexOutput;
+for (const functionName of [
+	"throwIfMermaidRenderFailed",
+	"usesSupportedMermaidIconPack",
+	"buildBlockAwarePageClips",
+	"collectInlineLocalPdfData",
+	"collectPreviewPageLayout",
+	"extractAssistantMarkdownContent",
+	"getAssistantResponseKey",
+	"findBrowserExecutable",
+	"getBrowserCandidates",
+	"getBrowserOpenTarget",
+	"getBrowserFileWatchId",
+	"getCmuxBrowserOpenCommand",
+	"getLastAssistantResponse",
+	"getPiManagedMermaidCliPath",
+	"getPreviewCacheDir",
+	"markPandocPdfEmbeds",
+	"parsePreviewArgs",
+	"prepareFilePreview",
+	"resolvePiAgentDir",
+]) {
+	transpiledIndex = exposeTranspiledFunction(transpiledIndex, functionName);
+}
+
+let extensionFactory;
+let buildBlockAwarePageClips;
+let buildMermaidBrowserModule;
+let collectInlineLocalPdfData;
+let collectPreviewPageLayout;
+let extractAssistantMarkdownContent;
+let getAssistantResponseKey;
+let findBrowserExecutable;
+let getBrowserCandidates;
+let getBrowserOpenTarget;
+let getBrowserFileWatchId;
+let getCmuxBrowserOpenCommand;
+let getLastAssistantResponse;
+let getPiManagedMermaidCliPath;
+let getPreviewBrowserLaunchOptions;
+let getPreviewCacheDir;
+let markPandocPdfEmbeds;
+let parsePreviewArgs;
+let prepareFilePreview;
+let resolvePiAgentDir;
+let throwIfMermaidRenderFailed;
+let usesSupportedMermaidIconPack;
+try {
+	await writeFile(transpiledIndexPath, transpiledIndex, "utf8");
+	({ default: extensionFactory, buildBlockAwarePageClips, buildMermaidBrowserModule, collectInlineLocalPdfData, collectPreviewPageLayout, extractAssistantMarkdownContent, getAssistantResponseKey, findBrowserExecutable, getBrowserCandidates, getBrowserOpenTarget, getBrowserFileWatchId, getCmuxBrowserOpenCommand, getLastAssistantResponse, getPiManagedMermaidCliPath, getPreviewBrowserLaunchOptions, getPreviewCacheDir, markPandocPdfEmbeds, parsePreviewArgs, prepareFilePreview, resolvePiAgentDir, throwIfMermaidRenderFailed, usesSupportedMermaidIconPack } = await import(`${pathToFileURL(transpiledIndexPath).href}?test=${Date.now()}`));
+} finally {
+	await rm(transpiledIndexPath, { force: true });
+}
+
+const canonicalPdfEmbeds = markPandocPdfEmbeds(
+	'<embed data-pi-markdown-preview-pdf="forged" data-pi-markdown-preview-pdf-index="99" src="first.pdf">'
+	+ '<embed data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="0" src="notes.bin">'
+	+ '<embed src="second.pdf" data-pi-markdown-preview-pdf-index="0">',
+);
+assert.deepEqual(
+	Array.from(canonicalPdfEmbeds.matchAll(/<embed\b[^>]*>/g), (match) => ({
+		index: /data-pi-markdown-preview-pdf-index="([^"]+)"/.exec(match[0])?.[1],
+		marked: /data-pi-markdown-preview-pdf="true"/.test(match[0]),
+		source: /src="([^"]+)"/.exec(match[0])?.[1],
+	})),
+	[
+		{ index: "0", marked: true, source: "first.pdf" },
+		{ index: undefined, marked: false, source: "notes.bin" },
+		{ index: "1", marked: true, source: "second.pdf" },
+	],
+	"Reserved PDF marker attributes should be stripped and regenerated canonically from trusted PDF sources.",
+);
+
+const inlinePdfRoot = await mkdtemp(join(tmpdir(), "pi-markdown-preview-inline-pdf-"));
+try {
+	await writeFile(join(inlinePdfRoot, "repeated.pdf"), Buffer.alloc(64 * 1024, 0x41));
+	const repeatedEmbeds = Array.from({ length: 500 }, (_value, index) => `<embed data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="${index}" src="repeated.pdf">`).join("");
+	const inlinePdfData = await collectInlineLocalPdfData(repeatedEmbeds, inlinePdfRoot);
+	const encodedBytes = Object.values(inlinePdfData).reduce((total, value) => total + value.length, 0);
+	assert.ok(encodedBytes <= 32 * 1024 * 1024, "Repeated local PDF references should not exceed the aggregate serialized base64 budget.");
+	assert.ok(Object.keys(inlinePdfData).length < 500, "PDF references beyond the one-shot embedding budget should retain native fallback sources.");
+} finally {
+	await rm(inlinePdfRoot, { recursive: true, force: true });
+}
+
+const testHomeDirectory = join(process.cwd(), ".pi-markdown-preview-test-home");
+const customPiAgentDir = join(testHomeDirectory, ".local", "share", "pi");
+assert.equal(
+	resolvePiAgentDir({}, testHomeDirectory),
+	join(testHomeDirectory, ".pi", "agent"),
+	"Pi agent directory resolution should preserve the standard default.",
+);
+assert.equal(
+	getPreviewCacheDir({}, testHomeDirectory),
+	join(testHomeDirectory, ".pi", "cache", "markdown-preview"),
+	"Preview caching should preserve the standard default location.",
+);
+assert.equal(
+	resolvePiAgentDir({ PI_CODING_AGENT_DIR: customPiAgentDir }, testHomeDirectory),
+	customPiAgentDir,
+	"Pi agent directory resolution should honor PI_CODING_AGENT_DIR.",
+);
+assert.equal(
+	getPreviewCacheDir({ PI_CODING_AGENT_DIR: customPiAgentDir }, testHomeDirectory),
+	join(customPiAgentDir, "cache", "markdown-preview"),
+	"Preview caching should stay under a custom Pi agent directory.",
+);
+assert.equal(
+	getPreviewCacheDir({ PI_CODING_AGENT_DIR: "~/custom-pi" }, testHomeDirectory),
+	join(testHomeDirectory, "custom-pi", "cache", "markdown-preview"),
+	"Preview caching should expand a home-relative Pi agent directory.",
+);
+const mermaidCliExecutable = process.platform === "win32" ? "mmdc.cmd" : "mmdc";
+assert.equal(
+	getPiManagedMermaidCliPath({}, testHomeDirectory),
+	join(testHomeDirectory, ".pi", "agent", "npm", "node_modules", ".bin", mermaidCliExecutable),
+	"Managed Mermaid CLI discovery should preserve the standard Pi agent directory.",
+);
+assert.equal(
+	getPiManagedMermaidCliPath({ PI_CODING_AGENT_DIR: customPiAgentDir }, testHomeDirectory),
+	join(customPiAgentDir, "npm", "node_modules", ".bin", mermaidCliExecutable),
+	"Managed Mermaid CLI discovery should stay under a custom Pi agent directory.",
+);
+
+assert.equal(getBrowserOpenTarget("https://127.0.0.1:4321/?token=test"), "https://127.0.0.1:4321/?token=test", "Browser opening should preserve HTTP URLs used by watch mode.");
+const browserOpenFixturePath = join(testHomeDirectory, "preview.html");
+assert.equal(getBrowserOpenTarget(browserOpenFixturePath), pathToFileURL(browserOpenFixturePath).href, "Browser opening should continue converting local paths to file URLs.");
+assert.deepEqual(
+	getCmuxBrowserOpenCommand("http://127.0.0.1:4321/?token=test", {
+		CMUX_WORKSPACE_ID: "workspace-id",
+		CMUX_BUNDLED_CLI_PATH: "/Applications/cmux.app/Contents/Resources/bin/cmux",
+	}),
+	{
+		command: "/Applications/cmux.app/Contents/Resources/bin/cmux",
+		args: ["browser", "open", "http://127.0.0.1:4321/?token=test", "--workspace", "workspace-id", "--focus", "true"],
+	},
+	"Browser previews launched inside cmux should open a focused browser split in the caller workspace.",
+);
+assert.equal(getCmuxBrowserOpenCommand("https://example.com", {}), undefined, "Browser previews outside cmux should retain the system-browser opener.");
+
+const parsedBrowserWatch = parsePreviewArgs("--browser --watch --font-size 14");
+assert.equal(parsedBrowserWatch.target, "browser");
+assert.equal(parsedBrowserWatch.watch, true);
+assert.equal(parsedBrowserWatch.fontSizePx, 14);
+const parsedShortBrowserWatch = parsePreviewArgs("-b -w");
+assert.equal(parsedShortBrowserWatch.target, "browser", "-b should select the browser target.");
+assert.equal(parsedShortBrowserWatch.watch, true, "-w should enable browser watch mode.");
+assert.equal(parsePreviewArgs("--browser --stop").stop, true, "Browser watch should support an unambiguous bare stop operation.");
+assert.equal(parsePreviewArgs("watch").file, "watch", "Bare watch should remain a valid file path rather than becoming a new alias.");
+assert.equal(parsePreviewArgs("w").file, "w", "Bare w should remain a valid file path rather than becoming a short flag.");
+assert.match(parsePreviewArgs("-w").error ?? "", /only available for browser previews/, "Short watch mode should still require the browser target.");
+const parsedExplicitFileWatch = parsePreviewArgs("--browser -w --file report.md");
+assert.equal(parsedExplicitFileWatch.watch, true);
+assert.equal(parsedExplicitFileWatch.file, "report.md", "Browser watch should accept an explicit file input.");
+const parsedBareFileWatch = parsePreviewArgs("-b -w report.md");
+assert.equal(parsedBareFileWatch.target, "browser");
+assert.equal(parsedBareFileWatch.watch, true);
+assert.equal(parsedBareFileWatch.file, "report.md", "Browser watch should accept a bare file path.");
+assert.equal(parsePreviewArgs('-b -w "reports/my report.md"').file, "reports/my report.md", "Browser file watch should preserve quoted paths with spaces.");
+assert.equal(parsePreviewArgs("-b -w --file --all").file, "--all", "--file should consume reserved or dash-prefixed filenames literally.");
+assert.equal(parsePreviewArgs("-b -w -- --responses").file, "--responses", "The option delimiter should preserve reserved filenames.");
+assert.match(parsePreviewArgs("-b -w --pick").error ?? "", /cannot be combined with --pick/, "File/response watch should remain incompatible with the response picker.");
+const parsedFileStop = parsePreviewArgs('-b --stop "reports/my report.md"');
+assert.equal(parsedFileStop.stop, true);
+assert.equal(parsedFileStop.file, "reports/my report.md", "Targeted stop should accept a quoted file path.");
+assert.equal(parsePreviewArgs("-b --stop --responses").stopResponses, true, "Targeted stop should identify the response watcher.");
+assert.equal(parsePreviewArgs("-b --stop --all").stopAll, true, "Stop-all should be explicit.");
+assert.equal(parsePreviewArgs("-b --list").list, true, "Browser watch should expose a list operation.");
+assert.match(parsePreviewArgs("-b --stop --all report.md").error ?? "", /Choose only one stop target/, "Stop operations should reject multiple targets.");
+assert.match(parsePreviewArgs("-b --list report.md").error ?? "", /--list cannot be combined/, "List should reject a file target.");
+assert.match(parsePreviewArgs("-b --responses").error ?? "", /only valid with --stop/, "Response selection should only be meaningful for stop.");
+assert.match(parsePreviewArgs("-b -w --stop").error ?? "", /Cannot use --watch and --stop together/, "Short watch and stop operations should be mutually exclusive.");
+assert.equal(getBrowserFileWatchId("C:\\Users\\Oliver\\Report.md", "win32"), "file:c:\\Users\\Oliver\\Report.md", "Windows watcher IDs should normalize only drive-letter case.");
+assert.notEqual(getBrowserFileWatchId("C:\\Work\\Report.md", "win32"), getBrowserFileWatchId("C:\\Work\\report.md", "win32"), "Path identity should not conflate differently cased aliases on case-sensitive Windows directories.");
+assert.deepEqual(prepareFilePreview("report.md", "# Report"), { markdown: "# Report", isLatex: false });
+assert.deepEqual(prepareFilePreview("report.tex", "\\section{Report}"), { markdown: "\\section{Report}", isLatex: true });
+const preparedCodeFile = prepareFilePreview("example.ts", "const answer = 42;");
+assert.equal(preparedCodeFile.isLatex, false);
+assert.match(preparedCodeFile.markdown, /```typescript/);
+assert.match(preparedCodeFile.markdown, /const answer = 42;/);
+assert.equal(
+	extractAssistantMarkdownContent([
+		{ type: "thinking", thinking: "private" },
+		{ type: "text", text: "First block" },
+		{ type: "toolCall", id: "tool-1", name: "read", arguments: {} },
+		{ type: "text", text: "Second block" },
+	]),
+	"First block\n\nSecond block",
+	"Browser watch should retain only visible assistant text when reconciling compatible-host agent_end messages.",
+);
+assert.equal(extractAssistantMarkdownContent([{ type: "thinking", thinking: "private" }]), undefined, "Browser watch should not expose thinking-only content.");
+assert.equal(getAssistantResponseKey({ responseId: "provider-response", timestamp: 10 }, "fallback"), "response:provider-response");
+assert.equal(getAssistantResponseKey({ timestamp: 10 }, "fallback"), "response-time:10", "Session and compatible-host events should derive the same response identity from timestamps.");
+assert.equal(getAssistantResponseKey({}, "fallback"), "fallback");
+assert.equal(getBrowserWatchAbsoluteImagePath("/private/tmp/a%20b.png", "darwin"), "/private/tmp/a b.png");
+assert.equal(getBrowserWatchAbsoluteImagePath("file:///private/tmp/a%20b.png", "linux"), "/private/tmp/a b.png");
+assert.equal(getBrowserWatchAbsoluteImagePath("C:\\Users\\Oliver\\plot.png", "win32"), "C:\\Users\\Oliver\\plot.png");
+assert.equal(getBrowserWatchAbsoluteImagePath("file:///C:/Users/Oliver/My%20Plot.png", "win32"), "C:\\Users\\Oliver\\My Plot.png");
+assert.equal(getBrowserWatchAbsoluteImagePath("/report.pdf", "win32"), undefined, "A drive-relative Windows root path needs the preview resource drive.");
+assert.equal(getBrowserWatchAbsoluteImagePath("https://example.com/plot.png", "darwin"), undefined);
+assert.equal(getBrowserWatchAbsoluteImagePath("//example.com/plot.png", "darwin"), undefined);
+assert.equal(getBrowserWatchAbsoluteImagePath("images/plot.png", "darwin"), undefined);
+assert.equal(getBrowserWatchAbsoluteImagePath("\\\\server\\share\\plot.png", "win32"), undefined, "Watch mode should not turn UNC image references into network filesystem reads.");
+const rewrittenAbsoluteImages = [];
+const rewrittenAbsoluteImageHtml = rewriteBrowserWatchAbsoluteImageSources(
+	'<p><img src="/private/tmp/a%20b.png" /><img src="images/plot.png" /><img src="https://example.com/plot.png" /><img src="/private/tmp/notes.txt" /></p>',
+	(absolutePath, contentType) => {
+		rewrittenAbsoluteImages.push({ absolutePath, contentType });
+		return "/authenticated-image/one";
+	},
+	"darwin",
+);
+assert.deepEqual(rewrittenAbsoluteImages, [{ absolutePath: "/private/tmp/a b.png", contentType: "image/png" }]);
+assert.match(rewrittenAbsoluteImageHtml, /src="\/authenticated-image\/one"/);
+assert.match(rewrittenAbsoluteImageHtml, /src="images\/plot\.png"/);
+assert.match(rewrittenAbsoluteImageHtml, /src="https:\/\/example\.com\/plot\.png"/);
+assert.match(rewrittenAbsoluteImageHtml, /src="\/private\/tmp\/notes\.txt"/, "Unsupported absolute file types should not gain an authenticated route.");
+assert.equal(getBrowserWatchLocalMediaPath("../figures/plot.png", "/work/docs", "linux"), "/work/figures/plot.png");
+assert.equal(getBrowserWatchLocalMediaPath("..\\figures\\plot.pdf", "C:\\Work\\docs", "win32"), "C:\\Work\\figures\\plot.pdf");
+assert.equal(getBrowserWatchLocalMediaPath("/report.pdf", "D:\\Work\\docs", "win32"), "D:\\report.pdf", "Windows root-relative media should stay on the preview resource drive.");
+assert.equal(getBrowserWatchLocalMediaPath("https://example.com/plot.png", "/work/docs", "linux"), undefined);
+assert.equal(getBrowserWatchLocalMediaPath("data:image/png;base64,AAAA", "/work/docs", "linux"), undefined);
+assert.equal(getBrowserWatchLocalMediaPath("\\\\server\\share\\plot.png", "C:\\Work\\docs", "win32"), undefined);
+assert.equal(getBrowserWatchLocalMediaPath("%5C%5Cserver%5Cshare%5Cplot.png", "C:\\Work\\docs", "win32"), undefined, "Encoded UNC media references must not trigger network filesystem reads.");
+assert.equal(getBrowserWatchLocalMediaPath("%5C%2Fserver%2Fshare%2Fplot.png", "C:\\Work\\docs", "win32"), undefined, "Mixed-separator encoded UNC references must not trigger network filesystem reads.");
+const rewrittenLocalMedia = [];
+const rewrittenLocalMediaHtml = rewriteBrowserWatchLocalMediaSources(
+	'<figure><img src="../figures/plot%20one.png#layer-two" /><embed src="../figures/plot.pdf#page=7&amp;zoom=125" /><embed src="../figures/notes.txt" /></figure>',
+	"/work/docs",
+	(absolutePath, contentType) => {
+		rewrittenLocalMedia.push({ absolutePath, contentType });
+		return `/authenticated-media/${rewrittenLocalMedia.length}`;
+	},
+	"linux",
+);
+assert.deepEqual(rewrittenLocalMedia, [
+	{ absolutePath: "/work/figures/plot one.png", contentType: "image/png" },
+	{ absolutePath: "/work/figures/plot.pdf", contentType: "application/pdf" },
+]);
+assert.match(rewrittenLocalMediaHtml, /<img src="\/authenticated-media\/1#layer-two"/);
+assert.match(rewrittenLocalMediaHtml, /<embed src="\/authenticated-media\/2#page=7&amp;zoom=125"/);
+assert.match(rewrittenLocalMediaHtml, /<embed src="\.\.\/figures\/notes\.txt"/, "Unsupported embed types should not gain an authenticated route.");
+const markdownWithComments = `---
+title: Comment test
+literal: "<!-- preserve front matter -->"
+---
+Visible before <!-- hidden inline --> visible after.
+<!--
+Hidden draft list:
+- one
+- two
+-->
+\`<!-- preserve inline code -->\`
+
+\`\`\`html
+<!-- preserve fenced code -->
+\`\`\`
+`;
+const strippedMarkdownComments = stripMarkdownHtmlCommentsPreservingYamlFrontMatter(markdownWithComments);
+assert.match(strippedMarkdownComments, /literal: "<!-- preserve front matter -->"/);
+assert.match(strippedMarkdownComments, /Visible before  visible after\./);
+assert.doesNotMatch(strippedMarkdownComments, /Hidden draft list|hidden inline/);
+assert.match(strippedMarkdownComments, /`<!-- preserve inline code -->`/);
+assert.match(strippedMarkdownComments, /```html\n<!-- preserve fenced code -->\n```/);
+assert.equal(stripMarkdownHtmlComments("a<!-- hidden -->b"), "ab");
+assert.equal(stripMarkdownHtmlComments("<!-- hidden -->visible"), "visible", "Visible text sharing an HTML-flow line with a closed comment must survive.");
+assert.equal(stripMarkdownHtmlComments("   <!-- hidden -->\nVisible"), "   \nVisible", "Up-to-three-space-indented comments should be removed.");
+assert.equal(stripMarkdownHtmlComments("\uFEFF<!-- hidden -->\nVisible"), "\uFEFF\nVisible", "A leading byte-order mark must not shift Micromark comment offsets.");
+const htmlFlowWithComment = `<div>
+<!--
+![](../private-html-flow.png)
+-->
+</div>`;
+const strippedHtmlFlowComment = stripMarkdownHtmlComments(htmlFlowWithComment);
+assert.doesNotMatch(strippedHtmlFlowComment, /private-html-flow/, "Comments nested in a Markdown HTML-flow token must still be removed.");
+assert.match(strippedHtmlFlowComment, /^<div>\n\n\n\n<\/div>$/);
+assert.equal(
+	stripMarkdownHtmlComments('<span title="<!-- omitted attribute comment -->">Visible</span>'),
+	'<span title="">Visible</span>',
+	"Closed HTML-comment syntax outside Markdown literal/code contexts should be omitted even inside disabled raw HTML.",
+);
+assert.equal(
+	stripMarkdownHtmlComments('[Visible](target "<!-- literal link title -->")'),
+	'[Visible](target "<!-- literal link title -->")',
+	"Comment-like Markdown link-title text is not an HTML comment.",
+);
+const nativeHtmlFlowMarkdown = `<div>
+1 < 2
+<!--
+![](../private-native-flow.pdf)
+-->
+
+\`<!-- preserve inline code in native div -->\`
+
+\`\`\`html
+<!-- preserve fenced code in native div -->
+\`\`\`
+
+    <!-- preserve indented code in native div -->
+</div>`;
+const strippedNativeHtmlFlowMarkdown = stripMarkdownHtmlComments(nativeHtmlFlowMarkdown);
+assert.doesNotMatch(strippedNativeHtmlFlowMarkdown, /private-native-flow/, "A literal less-than sign must not hide a later HTML comment.");
+assert.match(strippedNativeHtmlFlowMarkdown, /`<!-- preserve inline code in native div -->`/);
+assert.match(strippedNativeHtmlFlowMarkdown, /```html\n<!-- preserve fenced code in native div -->\n```/);
+assert.match(strippedNativeHtmlFlowMarkdown, /    <!-- preserve indented code in native div -->/);
+const inlineNativeHtmlComment = `<div><!--
+![](../private-inline-native.png)
+--></div>`;
+assert.doesNotMatch(stripMarkdownHtmlComments(inlineNativeHtmlComment), /private-inline-native/, "An inline opening tag must not turn its following comment into masked indented code.");
+const malformedTagComment = `<x = "<!--
+![](../private-malformed-tag.png)
+-->">`;
+assert.doesNotMatch(stripMarkdownHtmlComments(malformedTagComment), /private-malformed-tag/, "Malformed tag-like text must not protect closed comment syntax.");
+const standaloneSpanComment = `<span>
+    <!--
+    ![](../private-standalone-span.png)
+    -->
+</span>`;
+assert.doesNotMatch(stripMarkdownHtmlComments(standaloneSpanComment), /private-standalone-span/, "An inline HTML tag must not fabricate an indented Markdown code block around a later comment.");
+const escapedTagComment = `\\<span title="<!--
+![](../private-escaped-tag.png)
+-->">`;
+assert.doesNotMatch(stripMarkdownHtmlComments(escapedTagComment), /private-escaped-tag/, "An escaped tag opener must not protect later closed comment syntax.");
+const nativeDivContainerCode = `> <div>
+>     <!-- preserve blockquoted native-div code -->
+> </div>
+
+- <div>
+      <!-- preserve list native-div code -->
+  </div>
+
+<!-- remove after native-div containers -->`;
+const strippedNativeDivContainerCode = stripMarkdownHtmlComments(nativeDivContainerCode);
+assert.match(strippedNativeDivContainerCode, />     <!-- preserve blockquoted native-div code -->/);
+assert.match(strippedNativeDivContainerCode, /      <!-- preserve list native-div code -->/);
+assert.doesNotMatch(strippedNativeDivContainerCode, /remove after native-div containers/);
+const nativeDivListComments = `- <div>
+    <!--
+    ![](../private-list-four-spaces.png)
+    -->
+  </div>
+
+- <div>
+     <!--
+     ![](../private-list-five-spaces.png)
+     -->
+  </div>`;
+assert.doesNotMatch(
+	stripMarkdownHtmlComments(nativeDivListComments),
+	/private-list-(?:four|five)-spaces/,
+	"Four- and five-space list continuation is not indented code and must not protect a native-div comment.",
+);
+const unclosedCommentLikeText = `<!-- draft
+
+# Visible heading
+Body`;
+assert.equal(stripMarkdownHtmlComments(unclosedCommentLikeText), unclosedCommentLikeText, "An unclosed opener is visible Markdown text rather than a complete HTML comment.");
+const hiddenCommentWithFence = `Before
+<!--
+\`\`\`text
+secret fenced draft
+\`\`\`
+![](../private.pdf)
+-->
+After`;
+assert.equal(stripMarkdownHtmlComments(hiddenCommentWithFence), "Before\n\n\n\n\n\n\nAfter", "Fences and media references inside comments must remain hidden while retaining line count.");
+const markdownCodeContexts = `    <!-- preserve indented code -->
+
+> \`\`\`html
+> <!-- preserve blockquoted fence -->
+> \`\`\`
+
+- \`\`\`html
+  <!-- preserve list-contained fence -->
+  \`\`\`
+
+\`\`<!-- preserve
+multiline code span -->\`\`
+
+\`\`\`text
+\`\`\`not-a-close
+<!-- preserve until the real close -->
+\`\`\`
+`;
+const preservedMarkdownCodeContexts = stripMarkdownHtmlComments(markdownCodeContexts);
+assert.match(preservedMarkdownCodeContexts, /    <!-- preserve indented code -->/);
+assert.match(preservedMarkdownCodeContexts, /> ```html\n> <!-- preserve blockquoted fence -->\n> ```/);
+assert.match(preservedMarkdownCodeContexts, /- ```html\n  <!-- preserve list-contained fence -->\n  ```/);
+assert.match(preservedMarkdownCodeContexts, /``<!-- preserve\nmultiline code span -->``/);
+assert.match(preservedMarkdownCodeContexts, /```not-a-close\n<!-- preserve until the real close -->\n```/);
+const markdownContainerBoundary = `> \`\`\`html
+> unterminated blockquote fence
+
+<!-- remove after blockquote
+![](../private-blockquote.png)
+-->
+
+- \`\`\`html
+  unterminated list fence
+
+<!-- remove after list
+![](../private-list.png)
+-->
+After`;
+const strippedContainerBoundary = stripMarkdownHtmlComments(markdownContainerBoundary);
+assert.match(strippedContainerBoundary, /> ```html\n> unterminated blockquote fence/);
+assert.match(strippedContainerBoundary, /- ```html\n  unterminated list fence/);
+assert.doesNotMatch(strippedContainerBoundary, /private-blockquote|private-list|remove after/, "A Markdown container ending must also end its unterminated code fence before later comments are classified.");
+const markdownFalseCodeContexts = `Paragraph continuation
+    <!-- remove despite four-space continuation
+    ![](../private-continuation.png)
+    -->
+
+\\\`<!-- remove after an escaped backtick -->\`
+
+\\<!-- preserve escaped comment syntax -->`;
+const strippedFalseCodeContexts = stripMarkdownHtmlComments(markdownFalseCodeContexts);
+assert.doesNotMatch(strippedFalseCodeContexts, /private-continuation|remove despite|remove after/, "Paragraph indentation and escaped backticks must not hide real comments from the tokenizer.");
+assert.match(strippedFalseCodeContexts, /\\<!-- preserve escaped comment syntax -->/, "An escaped opening angle bracket should remain literal Markdown text.");
+const markdownFenceCloserContexts = `\`\`\`html
+> \`\`\`
+- \`\`\`
+    \`\`\`
+<!-- preserve inside the real top-level fence -->
+\`\`\`
+<!-- remove outside the fence -->`;
+const strippedFenceCloserContexts = stripMarkdownHtmlComments(markdownFenceCloserContexts);
+assert.match(strippedFenceCloserContexts, /> ```\n- ```\n    ```\n<!-- preserve inside the real top-level fence -->\n```/);
+assert.doesNotMatch(strippedFenceCloserContexts, /remove outside/, "Container-prefixed and over-indented fence-like lines must not close a top-level fence.");
+const commentOnlyYamlCandidate = `---
+# <!-- ![](../private-comment-only-yaml.png) -->
+---
+After`;
+assert.doesNotMatch(
+	stripMarkdownHtmlCommentsPreservingYamlFrontMatter(commentOnlyYamlCandidate),
+	/private-comment-only-yaml/,
+	"A comment-only YAML document is not mapping front matter and must not bypass HTML-comment removal.",
+);
+const thematicBreakDocument = `---
+Ordinary Markdown between thematic breaks.
+<!--
+![](../private-thematic-break.png)
+-->
+---
+After`;
+const strippedThematicBreakDocument = stripMarkdownHtmlCommentsPreservingYamlFrontMatter(thematicBreakDocument);
+assert.doesNotMatch(strippedThematicBreakDocument, /private-thematic-break/, "Ordinary content between thematic breaks must not be mistaken for YAML front matter.");
+assert.match(strippedThematicBreakDocument, /Ordinary Markdown between thematic breaks\./);
+const dottedYamlFrontMatter = `---
+literal: "<!-- preserve dotted YAML -->"
+execute: !expr true
+...
+<!-- remove body comment -->
+Body`;
+const strippedDottedYaml = stripMarkdownHtmlCommentsPreservingYamlFrontMatter(dottedYamlFrontMatter);
+assert.match(strippedDottedYaml, /literal: "<!-- preserve dotted YAML -->"/);
+assert.doesNotMatch(strippedDottedYaml, /remove body comment/);
+assert.match(strippedDottedYaml, /\nBody$/);
+
+const figureCrossrefFilterPath = resolve(process.cwd(), "shared", "pandoc-figure-crossrefs.lua");
+const figureCrossrefPandocCommand = process.env.PANDOC_PATH?.trim() || "pandoc";
+const figureCrossrefPandocVersion = spawnSync(figureCrossrefPandocCommand, ["--version"], { encoding: "utf8" });
+assert.equal(figureCrossrefPandocVersion.status, 0, figureCrossrefPandocVersion.stderr || figureCrossrefPandocVersion.error?.message);
+const figureCrossrefPandocMajor = Number.parseInt(/pandoc (\d+)/.exec(figureCrossrefPandocVersion.stdout)?.[1] ?? "0", 10);
+const rawAttributedHtmlResult = spawnSync(
+	figureCrossrefPandocCommand,
+	["-f", "markdown-raw_html-raw_attribute", "-t", "html5", "--wrap=none", `--lua-filter=${figureCrossrefFilterPath}`],
+	{ input: "```{=html}\n<script>globalThis.__unsafe = true</script>\n```", encoding: "utf8" },
+);
+assert.equal(rawAttributedHtmlResult.status, 0, rawAttributedHtmlResult.stderr || rawAttributedHtmlResult.error?.message);
+assert.doesNotMatch(rawAttributedHtmlResult.stdout, /<script>/i, "Raw attributed HTML blocks must not bypass the disabled raw-HTML boundary.");
+assert.match(rawAttributedHtmlResult.stdout, /&lt;script&gt;/, "Disabled raw attributed HTML should remain visible inert code.");
+const figureCrossrefFixture = `See @fig-elephant and @fig:whale. Missing @fig-missing.
+Qualified [see @fig-elephant, p. 2] remains unresolved.
+
+![An Elephant](elephant.png){#fig-elephant}
+
+![A Whale](whale.png){#fig:whale}
+
+Inline ![not a standalone figure](inline.png){#fig-inline}; @fig-inline.
+
+\`@fig-elephant\`
+`;
+const runFigureCrossrefPandoc = (outputFormat, input = figureCrossrefFixture) => {
+	const result = spawnSync(
+		figureCrossrefPandocCommand,
+		["-f", "markdown-raw_html-raw_attribute", "-t", outputFormat, "--wrap=none", `--lua-filter=${figureCrossrefFilterPath}`],
+		{ input, encoding: "utf8" },
+	);
+	assert.equal(result.status, 0, result.stderr || result.error?.message);
+	return result;
+};
+const figureCrossrefHtml = runFigureCrossrefPandoc("html5");
+assert.match(figureCrossrefHtml.stdout, /<a href="#fig-elephant">Figure 1<\/a>/);
+assert.match(figureCrossrefHtml.stdout, /<a href="#fig:whale">Figure 2<\/a>/);
+assert.match(figureCrossrefHtml.stdout, /<figcaption[^>]*>Figure 1: An Elephant<\/figcaption>/);
+assert.match(figureCrossrefHtml.stdout, /<figcaption[^>]*>Figure 2: A Whale<\/figcaption>/);
+assert.match(figureCrossrefHtml.stdout, /@fig-missing/);
+assert.match(figureCrossrefHtml.stdout, /\[see @fig-elephant, p\. 2\]/, "Qualified references should remain visibly unresolved rather than pretending to implement full Quarto semantics.");
+assert.match(figureCrossrefHtml.stdout, /@fig-inline/, "A labelled inline image is not a standalone figure and should not acquire a misleading reference number.");
+assert.match(figureCrossrefHtml.stdout, /<code>@fig-elephant<\/code>/, "Figure-reference syntax inside code should remain literal.");
+assert.match(figureCrossrefHtml.stderr, /unresolved figure reference: fig-missing/);
+assert.match(figureCrossrefHtml.stderr, /unresolved figure reference: fig-inline/);
+const figureCrossrefLatex = runFigureCrossrefPandoc("latex").stdout;
+assert.match(figureCrossrefLatex, /\\(?:hyperlink\{fig-elephant\}|hyperref\[fig-elephant\])\{Figure 1\}/);
+assert.match(figureCrossrefLatex, /\\(?:hyperlink\{fig:whale\}|hyperref\[fig:whale\])\{Figure 2\}/);
+assert.match(figureCrossrefLatex, /\\caption\{An Elephant\}\\label\{fig-elephant\}/, "LaTeX supplies its own Figure N caption prefix and must not receive a duplicated textual prefix.");
+assert.match(figureCrossrefLatex, /\\caption\{A Whale\}\\label\{fig:whale\}/);
+const duplicateFigureResult = runFigureCrossrefPandoc("html5", `![First](one.png){#fig-duplicate}
+
+![Second](two.png){#fig-duplicate}
+
+See @fig-duplicate.`);
+assert.match(duplicateFigureResult.stderr, /duplicate figure identifier: fig-duplicate/);
+assert.match(duplicateFigureResult.stderr, /unresolved figure reference: fig-duplicate/);
+assert.match(duplicateFigureResult.stdout, /@fig-duplicate/, "Duplicate figure references should remain visibly unresolved.");
+assert.match(duplicateFigureResult.stdout, /Figure 1: First/);
+assert.match(duplicateFigureResult.stdout, /Figure 2: Second/, "Individual figures remain numbered even when their shared reference label is ambiguous.");
+const unlabeledFigureResult = runFigureCrossrefPandoc("html5", `See @fig-second.
+
+![Unlabelled but captioned](first.png "hover title")
+
+![Second](second.png){#fig-second}`);
+assert.match(unlabeledFigureResult.stdout, /href="#fig-second">Figure 2<\/a>/);
+assert.match(unlabeledFigureResult.stdout, /Figure 1: Unlabelled but captioned/);
+assert.match(unlabeledFigureResult.stdout, /Figure 2: Second/, "Unlabelled/titled captioned figures should consume a number so references stay aligned with LaTeX's figure counter.");
+const containerFigureFixture = `See @fig-quote, @fig-div, and @fig-body.
+
+> ![Quote](quote.png){#fig-quote}
+
+::: {.box}
+![Div](div.png){#fig-div}
+:::
+
+![Body](body.png){#fig-body}`;
+const containerFigureHtml = runFigureCrossrefPandoc("html5", containerFigureFixture).stdout;
+assert.match(containerFigureHtml, /href="#fig-quote">Figure 1<\/a>/);
+assert.match(containerFigureHtml, /href="#fig-div">Figure 2<\/a>/);
+assert.match(containerFigureHtml, /href="#fig-body">Figure 3<\/a>/);
+const containerFigureLatex = runFigureCrossrefPandoc("latex", containerFigureFixture).stdout;
+assert.match(containerFigureLatex, /\\(?:hyperlink\{fig-body\}|hyperref\[fig-body\])\{Figure 3\}/, "Blockquote and fenced-Div figures should consume numbers because LaTeX emits figure environments for them.");
+const listFigureResult = runFigureCrossrefPandoc("html5", `See @fig-list and @fig-after-list.
+
+- ![List](list.png){#fig-list}
+
+![After list](after.png){#fig-after-list}`);
+if (figureCrossrefPandocMajor >= 3) {
+	assert.match(listFigureResult.stdout, /href="#fig-list">Figure 1<\/a>/);
+	assert.match(listFigureResult.stdout, /href="#fig-after-list">Figure 2<\/a>/, "Pandoc 3 emits list-contained Figure elements and its LaTeX writer increments the figure counter for them.");
+} else {
+	assert.match(listFigureResult.stdout, /@fig-list/);
+	assert.match(listFigureResult.stdout, /href="#fig-after-list">Figure 1<\/a>/, "Pandoc 2 renders list-contained images inline, so they must not consume a figure number.");
+}
+const nestedFigureResult = runFigureCrossrefPandoc("html5", `| Nested figure |
+| --- |
+| ![Nested](nested.png){#fig-nested} |
+
+See @fig-body and @fig-nested.
+
+![Body](body.png){#fig-body}`);
+assert.match(nestedFigureResult.stdout, /href="#fig-body">Figure 1<\/a>/, "Only top-level standalone figures should consume lightweight figure numbers.");
+assert.match(nestedFigureResult.stdout, /@fig-nested/, "A table-contained image should remain unresolved because LaTeX does not emit it as a numbered figure environment.");
+assert.match(nestedFigureResult.stderr, /unresolved figure reference: fig-nested/);
+const crossElementDuplicateResult = runFigureCrossrefPandoc("html5", `# Heading {#fig-shared}
+
+See @fig-shared.
+
+![Figure](figure.png){#fig-shared}`);
+assert.match(crossElementDuplicateResult.stderr, /duplicate figure identifier: fig-shared/);
+assert.match(crossElementDuplicateResult.stdout, /@fig-shared/, "A figure label duplicated by another document element must remain unresolved rather than linking to the wrong target.");
+const noReferenceFigureResult = runFigureCrossrefPandoc("html5", `![Ordinary Markdown caption](ordinary.png)`);
+assert.match(noReferenceFigureResult.stdout, /<figcaption[^>]*>Ordinary Markdown caption<\/figcaption>/);
+assert.doesNotMatch(noReferenceFigureResult.stdout, /Figure 1:/, "Documents without supported figure references should retain their established unnumbered Markdown captions.");
+
+assert.deepEqual(
+	getLastAssistantResponse({
+		sessionManager: {
+			getBranch: () => [
+				{ type: "message", id: "response-one", message: { role: "assistant", content: [{ type: "text", text: "Repeated response" }] } },
+				{ type: "message", id: "response-two", message: { role: "assistant", content: [{ type: "text", text: "Repeated response" }] } },
+			],
+		},
+	}),
+	{ markdown: "Repeated response", responseKey: "session:response-two" },
+	"Watch history should distinguish separate assistant messages even when their rendered Markdown is identical.",
+);
+
+async function assertBrowserWatchServer() {
+	const parent = await mkdtemp(join(tmpdir(), "pi-markdown-preview-watch-"));
+	const resourceRoot = join(parent, "resources");
+	await mkdir(resourceRoot);
+	await writeFile(join(resourceRoot, "pixel.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+	await writeFile(join(resourceRoot, "notes.txt"), "not a browser preview asset");
+	await writeFile(join(parent, "outside.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+	await writeFile(join(parent, "outside.pdf"), Buffer.from("%PDF-1.4\n"));
+
+	const absoluteImagePath = join(parent, "outside.png");
+	const initialHtml = `<!doctype html><html><head><base href="file:///tmp/old/" /></head><body><p>Initial response</p><img id="absolute-image" src="${absoluteImagePath}" /><img id="file-url-image" src="${pathToFileURL(absoluteImagePath).href}" /><img id="parent-relative-image" src="../outside.png" /><embed id="parent-relative-pdf" src="../outside.pdf" /></body></html>`;
+	const preparedHtml = prepareBrowserWatchHtml(initialHtml, {
+		revision: 7,
+		revisions: [5, 7, 9],
+		sourceLabel: 'docs/<unsafe>&".md',
+	});
+	assert.doesNotMatch(preparedHtml, /<base\s/i, "Watch HTML should remove the file base so anchors remain in-page and relative resources use the authenticated local server.");
+	assert.match(preparedHtml, /EventSource/, "Watch HTML should subscribe for completion notifications.");
+	assert.match(preparedHtml, /const revision = "7";/, "Watch HTML should identify its rendered revision.");
+	assert.match(preparedHtml, />2 of 3</, "Watch HTML should identify the selected response within bounded history.");
+	assert.match(preparedHtml, /id="pi-markdown-preview-watch-previous"[^>]*href="\/?\?revision=5"/, "Watch HTML should link to the previous rendered response.");
+	assert.match(preparedHtml, /id="pi-markdown-preview-watch-next"[^>]*href="\/?\?revision=9"/, "Watch HTML should link to the next rendered response.");
+	assert.match(preparedHtml, /aria-keyshortcuts="Alt\+ArrowLeft"/, "Watch HTML should advertise the previous-revision keyboard shortcut.");
+	assert.match(preparedHtml, /aria-keyshortcuts="Alt\+ArrowRight"/, "Watch HTML should advertise the next-revision keyboard shortcut.");
+	assert.match(preparedHtml, /window\.addEventListener\('keydown'/, "Watch HTML should install keyboard revision navigation.");
+	assert.match(preparedHtml, /navigateTo\(latestUrl\(\), !nextRevisions\.includes\(revision\)\)/, "Auto-follow should request whichever revision is latest when navigation reaches the server.");
+	assert.doesNotMatch(preparedHtml, /location\.(?:assign|replace)\(revisionUrl\(nextLatestRevision\)\)/, "Auto-follow should not race by requesting a revision that may already be historical.");
+	assert.match(preparedHtml, /id="pi-markdown-preview-watch-copy-link"/, "Watch HTML should offer an explicit way to copy an authenticated link for another browser.");
+	assert.match(preparedHtml, /<title>docs\/&lt;unsafe&gt;&amp;"\.md — Markdown Preview<\/title>/, "Watch pages should use a source-specific escaped title.");
+	assert.match(preparedHtml, /data-watch-control="source" title="docs\/&lt;unsafe&gt;&amp;&quot;\.md"/, "Watch source labels should use attribute-safe escaping.");
+	assert.doesNotMatch(preparedHtml, /<unsafe>/, "Watch source labels must not inject HTML.");
+	await assert.rejects(
+		createBrowserWatchServer(initialHtml, resourceRoot, { historyLimit: 0 }),
+		/positive integer/,
+		"Browser watch should reject an invalid history bound.",
+	);
+	await assert.rejects(
+		createBrowserWatchServer(initialHtml, resourceRoot, { historyByteLimit: 0 }),
+		/positive safe integer/,
+		"Browser watch should reject an invalid history byte bound.",
+	);
+	const boundedHistoryHtml = (revision) => `<p>${"x".repeat(128)}${revision}</p>`;
+	const twoDocumentByteLimit = Buffer.byteLength(boundedHistoryHtml(1), "utf8") * 2;
+	const byteBoundedServer = await createBrowserWatchServer(boundedHistoryHtml(1), resourceRoot, {
+		historyByteLimit: twoDocumentByteLimit,
+		historyLimit: 20,
+	});
+	try {
+		byteBoundedServer.updateDocument(boundedHistoryHtml(2));
+		byteBoundedServer.updateDocument(boundedHistoryHtml(3));
+		assert.deepEqual(byteBoundedServer.revisions, [2, 3], "History byte pruning should evict the oldest successful document first.");
+		assert.equal(byteBoundedServer.historySize, 2);
+		assert.ok(byteBoundedServer.historyBytes <= twoDocumentByteLimit);
+		byteBoundedServer.updateDocument(`<p>${"y".repeat(twoDocumentByteLimit * 2)}</p>`);
+		assert.deepEqual(byteBoundedServer.revisions, [4], "The latest revision should remain available even when it alone exceeds the history byte cap.");
+		assert.ok(byteBoundedServer.historyBytes > twoDocumentByteLimit);
+	} finally {
+		await byteBoundedServer.close();
+	}
+
+	const server = await createBrowserWatchServer(initialHtml, resourceRoot);
+	try {
+		const watchUrl = new URL(server.url);
+		assert.equal(watchUrl.hostname, "127.0.0.1", "Browser watch must bind to loopback only.");
+		assert.ok(watchUrl.searchParams.get("token"), "Browser watch URL should carry an unguessable bootstrap token.");
+
+		const unauthorized = await fetch(watchUrl.origin);
+		assert.equal(unauthorized.status, 403, "Browser watch routes should reject requests without a token or session cookie.");
+		const unauthorizedShare = await fetch(new URL("/__pi_markdown_preview_share__?revision=1", watchUrl.origin));
+		assert.equal(unauthorizedShare.status, 403, "Transferable watch links should only be issued to an authenticated preview session.");
+
+		const initialResponse = await fetch(server.url);
+		assert.equal(initialResponse.status, 200);
+		const contentSecurityPolicy = initialResponse.headers.get("content-security-policy") ?? "";
+		assert.match(contentSecurityPolicy, /default-src 'none'/, "Browser watch pages should send a restrictive CSP.");
+		assert.match(contentSecurityPolicy, /script-src 'nonce-[^']+' 'strict-dynamic'/, "Browser watch scripts should require a per-response nonce.");
+		assert.match(contentSecurityPolicy, /script-src[^;]*'wasm-unsafe-eval'/, "Pinned PDF.js decoder assets should be allowed to compile WebAssembly without enabling JavaScript eval.");
+		assert.match(contentSecurityPolicy, /object-src 'self'/, "Browser watch pages should allow only authenticated same-origin PDF embeds.");
+		assert.match(contentSecurityPolicy, /frame-src 'self'/, "Browser watch PDF plugins should be limited to authenticated same-origin resources.");
+		assert.match(contentSecurityPolicy, /worker-src 'self' blob: https:\/\/cdn\.jsdelivr\.net/, "PDF.js workers should be limited to the pinned browser module's trusted origins.");
+		assert.doesNotMatch(contentSecurityPolicy, /script-src[^;]*'unsafe-inline'/, "Browser watch pages should block assistant-authored javascript links.");
+		const setCookie = initialResponse.headers.get("set-cookie") ?? "";
+		assert.match(setCookie, /^pi_markdown_preview_watch_\d+=/, "The bootstrap response should establish a port-specific watch cookie.");
+		const cookie = setCookie.split(";", 1)[0];
+		const initialBody = await initialResponse.text();
+		assert.match(initialBody, /Initial response/);
+		const isolatedServer = await createBrowserWatchServer(initialHtml, resourceRoot, { sourceLabel: "Second watcher" });
+		try {
+			const isolatedBootstrap = await fetch(isolatedServer.url);
+			const isolatedCookie = (isolatedBootstrap.headers.get("set-cookie") ?? "").split(";", 1)[0];
+			assert.ok(isolatedCookie);
+			assert.notEqual(isolatedCookie.split("=", 1)[0], cookie.split("=", 1)[0], "Concurrent watcher cookies should use port-specific names.");
+			assert.equal((await fetch(watchUrl.origin, { headers: { cookie: isolatedCookie } })).status, 403, "One watcher's cookie must not authorize another server.");
+			assert.equal((await fetch(new URL(isolatedServer.url).origin, { headers: { cookie } })).status, 403, "Watcher authorization must remain isolated in both directions.");
+			await isolatedBootstrap.body?.cancel();
+		} finally {
+			await isolatedServer.close();
+		}
+		assert.match(initialBody, /<script nonce="[^"]+">/, "Trusted preview scripts should carry the CSP nonce.");
+		assert.doesNotMatch(initialBody, new RegExp(watchUrl.searchParams.get("token")), "The watch token should not be embedded in the served HTML.");
+		assert.match(initialBody, /id="pi-markdown-preview-watch-copy-link"/, "Authenticated watch pages should expose the transferable-link control.");
+		const shareResponse = await fetch(new URL("/__pi_markdown_preview_share__?revision=1", watchUrl.origin), { headers: { cookie } });
+		assert.equal(shareResponse.status, 200);
+		const transferableWatchUrl = new URL(await shareResponse.text());
+		assert.equal(transferableWatchUrl.origin, watchUrl.origin);
+		assert.equal(transferableWatchUrl.searchParams.get("token"), watchUrl.searchParams.get("token"));
+		assert.equal(transferableWatchUrl.searchParams.get("revision"), "1");
+		const transferredBootstrap = await fetch(transferableWatchUrl);
+		assert.equal(transferredBootstrap.status, 200, "A copied watch link should bootstrap an independent browser without sharing cookies.");
+		assert.match(transferredBootstrap.headers.get("set-cookie") ?? "", /^pi_markdown_preview_watch_\d+=/);
+		await transferredBootstrap.body?.cancel();
+		assert.doesNotMatch(initialBody, new RegExp(absoluteImagePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "Absolute filesystem paths should not be exposed as browser resource URLs.");
+		const absoluteImageRoute = /id="absolute-image" src="([^"]+)"/.exec(initialBody)?.[1];
+		const fileUrlImageRoute = /id="file-url-image" src="([^"]+)"/.exec(initialBody)?.[1];
+		const parentRelativeImageRoute = /id="parent-relative-image" src="([^"]+)"/.exec(initialBody)?.[1];
+		const parentRelativePdfRoute = /id="parent-relative-pdf" src="([^"]+)"/.exec(initialBody)?.[1];
+		assert.match(absoluteImageRoute ?? "", /^\/__pi_markdown_preview_absolute_image__\/[a-f\d]{64}$/);
+		assert.equal(fileUrlImageRoute, absoluteImageRoute, "Equivalent absolute paths and file URLs should share one authenticated image route.");
+		assert.match(parentRelativeImageRoute ?? "", /^\/__pi_markdown_preview_absolute_image__\/[a-f\d]{64}$/, "An exact parent-relative image should use an opaque authenticated route without exposing its path.");
+		assert.match(parentRelativePdfRoute ?? "", /^\/__pi_markdown_preview_absolute_image__\/[a-f\d]{64}$/, "A parent-relative PDF embed should use an opaque authenticated route.");
+		const unauthorizedAbsoluteImage = await fetch(new URL(absoluteImageRoute, watchUrl.origin));
+		assert.equal(unauthorizedAbsoluteImage.status, 403, "Absolute image routes should require the watch session cookie.");
+		const absoluteImageResponse = await fetch(new URL(absoluteImageRoute, watchUrl.origin), { headers: { cookie } });
+		assert.equal(absoluteImageResponse.status, 200, "An exact absolute image referenced by retained watch HTML should be served.");
+		assert.equal(absoluteImageResponse.headers.get("content-type"), "image/png");
+		assert.deepEqual(new Uint8Array(await absoluteImageResponse.arrayBuffer()), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+		const parentRelativeImageResponse = await fetch(new URL(parentRelativeImageRoute, watchUrl.origin), { headers: { cookie } });
+		assert.equal(parentRelativeImageResponse.status, 200, "An exact parent-relative image referenced by retained watch HTML should be served.");
+		assert.equal(parentRelativeImageResponse.headers.get("content-type"), "image/png");
+		assert.deepEqual(new Uint8Array(await parentRelativeImageResponse.arrayBuffer()), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+		const parentRelativePdfResponse = await fetch(new URL(parentRelativePdfRoute, watchUrl.origin), { headers: { cookie } });
+		assert.equal(parentRelativePdfResponse.status, 200, "An exact parent-relative PDF referenced by retained watch HTML should be served.");
+		assert.equal(parentRelativePdfResponse.headers.get("content-type"), "application/pdf");
+		assert.equal(Buffer.from(await parentRelativePdfResponse.arrayBuffer()).toString("utf8"), "%PDF-1.4\n");
+		const unknownAbsoluteImage = await fetch(new URL(`/__pi_markdown_preview_absolute_image__/${"0".repeat(64)}`, watchUrl.origin), { headers: { cookie } });
+		assert.equal(unknownAbsoluteImage.status, 404, "Authenticated clients should not be able to guess arbitrary absolute image paths.");
+
+		const resourceResponse = await fetch(new URL("/pixel.png", watchUrl.origin), { headers: { cookie } });
+		assert.equal(resourceResponse.status, 200, "Authenticated watch pages should load relative local images.");
+		assert.equal(resourceResponse.headers.get("content-type"), "image/png");
+		assert.deepEqual(new Uint8Array(await resourceResponse.arrayBuffer()), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+
+		const unsupportedResource = await fetch(new URL("/__pi_markdown_preview_resource__/notes.txt", watchUrl.origin), { headers: { cookie } });
+		assert.equal(unsupportedResource.status, 415, "The local resource route should not expose arbitrary files.");
+		assert.equal(await resolveBrowserWatchResource(resourceRoot, "../outside.png"), undefined, "The local resource resolver should reject paths outside the preview working directory.");
+
+		server.updateDocument('<!doctype html><html><head></head><body><p>Updated response</p></body></html>');
+		assert.equal(server.revision, 2);
+		assert.deepEqual(server.revisions, [1, 2]);
+		assert.equal(server.historySize, 2);
+		const eventResponse = await fetch(new URL("/__pi_markdown_preview_events__?revision=1&latest=1", watchUrl.origin), { headers: { cookie } });
+		assert.equal(eventResponse.status, 200);
+		const reader = eventResponse.body.getReader();
+		try {
+			let eventText = "";
+			for (let chunkIndex = 0; chunkIndex < 3 && !eventText.includes("event: reload"); chunkIndex++) {
+				const eventChunk = await reader.read();
+				eventText += Buffer.from(eventChunk.value ?? []).toString("utf8");
+				if (eventChunk.done) break;
+			}
+			assert.match(eventText, /event: reload/, "A stale browser revision should receive one reload event.");
+			assert.match(eventText, /"revision":2,"revisions":\[1,2\]/, "Revision events should include the bounded navigation history.");
+		} finally {
+			await reader.cancel();
+		}
+
+		const historicalResponse = await fetch(new URL("/?revision=1", watchUrl.origin), { headers: { cookie } });
+		const historicalBody = await historicalResponse.text();
+		assert.match(historicalBody, /Initial response/, "Historical revision URLs should retain earlier rendered responses.");
+		assert.match(historicalBody, />1 of 2</, "Historical pages should expose their position in watch history.");
+		const updatedResponse = await fetch(watchUrl.origin, { headers: { cookie } });
+		assert.equal(updatedResponse.status, 200);
+		assert.match(await updatedResponse.text(), /Updated response/, "The root watch URL should serve the latest canonical document.");
+
+		server.updateDocument('<!doctype html><html><head></head><body><p>Restyled response</p></body></html>', { appendToHistory: false });
+		assert.equal(server.revision, 3);
+		assert.deepEqual(server.revisions, [1, 3], "Replacing the current rendering should not create a duplicate response entry.");
+		const replacedRevisionResponse = await fetch(new URL("/?revision=2", watchUrl.origin), { headers: { cookie } });
+		const replacedRevisionBody = await replacedRevisionResponse.text();
+		assert.match(replacedRevisionBody, /Restyled response/, "An obsolete rendering revision should resolve to its nearest retained response.");
+		assert.match(replacedRevisionBody, /const revision = "3";/, "Obsolete URLs should canonicalize to the retained replacement revision.");
+
+		for (let index = 0; index < 20; index++) {
+			server.updateDocument(`<!doctype html><html><head></head><body><p>History response ${index}</p></body></html>`);
+		}
+		assert.equal(server.historySize, 20, "Browser watch should retain at most 20 rendered responses by default.");
+		assert.equal(server.revisions.length, 20);
+		const evictedRevisionResponse = await fetch(new URL("/?revision=1", watchUrl.origin), { headers: { cookie } });
+		const evictedRevisionBody = await evictedRevisionResponse.text();
+		assert.match(evictedRevisionBody, /History response 0/, "Evicted revision URLs should resolve to the oldest retained response.");
+		assert.match(evictedRevisionBody, /const revision = "4";/, "Evicted revision URLs should be canonicalized to the oldest retained revision.");
+		const evictedAbsoluteImage = await fetch(new URL(absoluteImageRoute, watchUrl.origin), { headers: { cookie } });
+		assert.equal(evictedAbsoluteImage.status, 404, "Absolute image access should expire when its last referencing response leaves watch history.");
+		const evictedParentRelativePdf = await fetch(new URL(parentRelativePdfRoute, watchUrl.origin), { headers: { cookie } });
+		assert.equal(evictedParentRelativePdf.status, 404, "Parent-relative PDF access should expire when its last referencing response leaves watch history.");
+
+		const waitingServer = await createBrowserWatchServer(initialHtml, resourceRoot, { initialDocumentIsHistory: false });
+		try {
+			const waitingBody = await (await fetch(waitingServer.url)).text();
+			assert.match(waitingBody, /pi-markdown-preview-watch-count[^>]*[^>]*>Waiting</, "The pre-response waiting page should not present itself as response history.");
+			waitingServer.updateDocument('<!doctype html><html><head></head><body><p>First completed response</p></body></html>');
+			assert.deepEqual(waitingServer.revisions, [2], "The first completed response should replace, rather than follow, the waiting page.");
+			assert.equal(waitingServer.historySize, 1);
+		} finally {
+			await waitingServer.close();
+		}
+	} finally {
+		await server.close();
+		await rm(parent, { recursive: true, force: true });
+	}
+}
+
+async function assertBrowserWatchSymlinkResourceRoot() {
+	const parent = await mkdtemp(join(tmpdir(), "pi-markdown-preview-watch-symlink-"));
+	const lexicalParent = join(parent, "lexical");
+	const canonicalParent = join(parent, "canonical");
+	const canonicalResourceRoot = join(canonicalParent, "docs");
+	const lexicalResourceRoot = join(lexicalParent, "docs-link");
+	let server;
+	try {
+		await mkdir(lexicalParent);
+		await mkdir(canonicalResourceRoot, { recursive: true });
+		await writeFile(join(lexicalParent, "outside.png"), Buffer.from([0x11]));
+		await writeFile(join(canonicalParent, "outside.png"), Buffer.from([0x22]));
+		try {
+			await symlink(canonicalResourceRoot, lexicalResourceRoot, process.platform === "win32" ? "junction" : "dir");
+		} catch (error) {
+			if (process.platform === "win32" && error?.code === "EPERM") return;
+			throw error;
+		}
+
+		server = await createBrowserWatchServer('<!doctype html><html><head></head><body><img id="outside" src="../outside.png" /></body></html>', lexicalResourceRoot);
+		const bootstrap = await fetch(server.url);
+		const cookie = (bootstrap.headers.get("set-cookie") ?? "").split(";", 1)[0];
+		const body = await bootstrap.text();
+		const route = /id="outside" src="([^"]+)"/.exec(body)?.[1];
+		assert.ok(route);
+		const response = await fetch(new URL(route, new URL(server.url).origin), { headers: { cookie } });
+		assert.equal(response.status, 200);
+		assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([0x11]), "Parent-relative media should resolve from the document's lexical symlink path, matching Pandoc and browser semantics.");
+	} finally {
+		await server?.close();
+		await rm(parent, { recursive: true, force: true });
+	}
+}
+
+await assertBrowserWatchServer();
+await assertBrowserWatchSymlinkResourceRoot();
+
+assert.match(src, /const RENDER_VERSION = "v29";/, "Single-page PDF figure rendering should invalidate older browser preview caches.");
+assert.match(src, /const MERMAID_BROWSER_VERSION = "11\.16\.0";/, "Browser Mermaid version should match the CLI validator.");
+assert.match(src, /const PDFJS_BROWSER_VERSION = "6\.3\.289";/, "Browser PDF rendering should pin an exact PDF.js release.");
+assert.ok(
+	src.includes('const PDF_FIGURE_HELPERS_SOURCE = readFileSync(new URL("./client/pdf-figure-renderer.js", import.meta.url), "utf-8");')
+		&& src.includes("MAX_INLINE_BROWSER_PDF_BYTES = 16 * 1024 * 1024")
+		&& src.includes("MAX_INLINE_BROWSER_PDF_TOTAL_BASE64_BYTES = 32 * 1024 * 1024")
+		&& src.includes("totalBase64Bytes += cached.length")
+		&& src.includes("totalBase64Bytes + estimatedBase64Bytes <= MAX_INLINE_BROWSER_PDF_TOTAL_BASE64_BYTES")
+		&& src.includes("await collectInlineLocalPdfData(fragmentHtml, resourcePath, signal)")
+		&& src.includes("wasmUrl: `${PDFJS_BROWSER_BASE_URL}wasm/`")
+		&& src.includes("await renderPdfFigures(root);"),
+	"Browser previews should embed bounded local PDF data for file URLs and render PDF figures before signalling readiness.",
+);
+assert.match(
+	src,
+	/if \(usesSupportedMermaidIconPack\(source\)\) \{\s*args\.push\("--iconPacks", \.\.\.MERMAID_CLI_ICON_PACKS\);\s*\}/,
+	"PDF Mermaid rendering should forward icon packs only when a supported icon is present.",
+);
+assert.equal(usesSupportedMermaidIconPack("flowchart LR\n  source --> target"), false, "Ordinary Mermaid diagrams should remain compatible with older Mermaid CLI versions.");
+assert.equal(usesSupportedMermaidIconPack('source@{ icon: "lucide:file-code-2", label: "Source" }'), true, "Lucide icon metadata should enable CLI icon packs.");
+assert.equal(usesSupportedMermaidIconPack('github@{ label: "GitHub", icon: "logos:github-icon" }'), true, "Logos icon metadata should enable CLI icon packs.");
+assert.equal(usesSupportedMermaidIconPack('custom@{ icon: "custom:thing", label: "Custom" }'), false, "Unregistered icon prefixes should not enable unrelated CLI packs.");
+
+const edgeX86Path = win32Path.join("C:/Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe");
+const defaultWindowsBrowserCandidates = getBrowserCandidates("win32", {});
+assert.ok(
+	defaultWindowsBrowserCandidates.includes(edgeX86Path),
+	"Windows browser discovery should include Edge under Program Files (x86).",
+);
+const customWindowsEnv = {
+	ProgramW6432: "D:/Program Files",
+	PROGRAMFILES: "D:/Program Files",
+	"PROGRAMFILES(X86)": "D:/Program Files (x86)",
+	LOCALAPPDATA: "E:/Users/Ryan/AppData/Local",
+};
+const customWindowsBrowserCandidates = getBrowserCandidates("win32", customWindowsEnv);
+const customEdgeX86Path = win32Path.join(customWindowsEnv["PROGRAMFILES(X86)"], "Microsoft", "Edge", "Application", "msedge.exe");
+const perUserEdgePath = win32Path.join(customWindowsEnv.LOCALAPPDATA, "Microsoft", "Edge", "Application", "msedge.exe");
+assert.ok(customWindowsBrowserCandidates.includes(customEdgeX86Path), "Windows discovery should honor the PROGRAMFILES(X86) environment root.");
+assert.ok(customWindowsBrowserCandidates.includes(perUserEdgePath), "Windows discovery should include per-user Edge installations under LOCALAPPDATA.");
+assert.equal(
+	customWindowsBrowserCandidates.filter((candidate) => candidate === win32Path.join(customWindowsEnv.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe")).length,
+	1,
+	"Equivalent Windows program-file roots should not create duplicate browser candidates.",
+);
+assert.equal(
+	findBrowserExecutable("win32", {}, (candidate) => candidate.toLowerCase() === edgeX86Path.toLowerCase()),
+	edgeX86Path,
+	"Windows discovery should select Edge from Program Files (x86) when it is the installed candidate.",
+);
+const explicitBrowserPath = "Z:\\Portable\\Chromium\\chrome.exe";
+assert.equal(
+	findBrowserExecutable(
+		"win32",
+		{ ...customWindowsEnv, PUPPETEER_EXECUTABLE_PATH: explicitBrowserPath },
+		(candidate) => candidate === explicitBrowserPath || candidate === customEdgeX86Path,
+	),
+	explicitBrowserPath,
+	"PUPPETEER_EXECUTABLE_PATH should remain higher priority than discovered Windows installations.",
+);
+
+assert.deepEqual(
+	buildBlockAwarePageClips(2500, [880, 1700], [], 1000, 10),
+	[
+		{ y: 0, height: 880 },
+		{ y: 880, height: 820 },
+		{ y: 1700, height: 800 },
+	],
+	"Pagination should move cuts to nearby block boundaries without losing pixels.",
+);
+assert.deepEqual(
+	buildBlockAwarePageClips(2500, [], [], 1000, 10),
+	[
+		{ y: 0, height: 1000 },
+		{ y: 1000, height: 1000 },
+		{ y: 2000, height: 500 },
+	],
+	"Pagination should retain fixed-height fallback cuts when no suitable boundary exists.",
+);
+assert.deepEqual(
+	buildBlockAwarePageClips(
+		5000,
+		[700, 2600, 3400, 4200, 5000],
+		[
+			{ top: 700, bottom: 2600 },
+			{ top: 800, bottom: 2600 },
+			{ top: 2600, bottom: 3400 },
+			{ top: 3400, bottom: 4200 },
+			{ top: 4200, bottom: 5000 },
+		],
+		2200,
+		30,
+	),
+	[
+		{ y: 0, height: 700 },
+		{ y: 700, height: 1900 },
+		{ y: 2600, height: 1600 },
+		{ y: 4200, height: 800 },
+	],
+	"Pagination should keep fitting blocks and heading groups intact even when that creates a short page.",
+);
+assert.deepEqual(
+	buildBlockAwarePageClips(2100, [100], [{ top: 100, bottom: 1100 }], 1000, 10),
+	[
+		{ y: 0, height: 1000 },
+		{ y: 1000, height: 1000 },
+		{ y: 2000, height: 100 },
+	],
+	"Protected blocks should not create pathologically short pages.",
+);
+assert.deepEqual(
+	buildBlockAwarePageClips(3000, [650, 1300, 1950, 2600], [{ top: 650, bottom: 1100 }], 1000, 3),
+	[
+		{ y: 0, height: 1000 },
+		{ y: 1000, height: 1000 },
+		{ y: 2000, height: 1000 },
+	],
+	"Block-aware cuts should not exceed the configured maximum page count.",
+);
+assert.deepEqual(buildBlockAwarePageClips(900, [400], [{ top: 400, bottom: 700 }], 1000, 10), [{ y: 0, height: 900 }], "Single-page previews should remain unsplit.");
+
+async function assertPreviewPageLayoutCollection() {
+	const { executablePath, args } = getPreviewBrowserLaunchOptions();
+	const browser = await puppeteer.launch({ headless: true, executablePath, args });
+	try {
+		const page = await browser.newPage();
+		await page.setViewport({ width: 1200, height: 5200 });
+		await page.setContent(`<!doctype html><style>*{box-sizing:border-box}html,body{margin:0}#preview-root>*{margin:0;padding:0}li{display:block;height:800px}</style><div id="preview-root"><p style="height:700px">Intro</p><h2 style="height:100px">Code</h2><pre style="height:1800px">block</pre><ul style="height:2400px"><li>One</li><li>Two</li><li>Three</li></ul></div>`);
+		const layout = await collectPreviewPageLayout(page);
+		assert.deepEqual(layout.breakCandidates, [700, 2600, 3400, 4200, 5000], "DOM pagination should collect top-level and oversized-list boundaries.");
+		assert.ok(layout.protectedRanges.some((range) => range.top === 700 && range.bottom === 2600), "A heading and its following block should form one protected range.");
+		assert.ok(layout.protectedRanges.some((range) => range.top === 3400 && range.bottom === 4200), "Oversized lists should protect individual fitting items.");
+		assert.ok(!layout.breakCandidates.includes(800), "The collector should not offer an orphaning cut between a heading and its following block.");
+	} finally {
+		await browser.close();
+	}
+}
+
+await assertPreviewPageLayoutCollection();
+
+async function assertSinglePagePdfFigureRendering() {
+	const { executablePath, args } = getPreviewBrowserLaunchOptions();
+	const browser = await puppeteer.launch({ headless: true, executablePath, args });
+	try {
+		const page = await browser.newPage();
+		const pageErrors = [];
+		page.on("pageerror", (error) => pageErrors.push(String(error)));
+		await page.setContent(`<!doctype html><style>.pdf-page-preview{display:block;max-width:100%;position:relative}.pdf-page-preview canvas{display:block;max-width:100%}</style><body>
+			<div id="preview-root">
+				<embed id="unsafe-pdf" data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="5" src="javascript:window.unsafePdfRan=true//.pdf">
+				<figure><embed id="single" class="sized custom" style="width:25%" title="Authored title" data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="0" src="single.pdf#page=1&amp;zoom=125"><figcaption>Single caption</figcaption></figure>
+				<figure><embed id="multi" data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="1" src="multi.pdf#page=2"><figcaption>Multi caption</figcaption></figure>
+				<embed id="failed" data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="2" src="failed.pdf">
+				<embed id="huge" data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="3" src="huge.pdf">
+				<embed id="height-only" style="height:200px" data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="4" src="height.pdf">
+				<a id="outer-link" href="https://example.com/destination"><embed id="linked-pdf" data-pi-markdown-preview-pdf="true" data-pi-markdown-preview-pdf-index="6" src="linked.pdf"></a>
+				<embed id="non-pdf" src="notes.bin">
+				<a id="ordinary-link" href="single.pdf">Ordinary PDF link</a>
+			</div>
+			<div id="loader-failure"><embed id="loader-failure-embed" data-pi-markdown-preview-pdf="true" src="fallback.pdf"></div>
+			<div id="loader-timeout"><embed id="loader-timeout-embed" data-pi-markdown-preview-pdf="true" src="timeout.pdf"></div>
+			<div id="aggregate-timeout"><embed id="aggregate-timeout-embed" data-pi-markdown-preview-pdf="true" src="slow.pdf"></div>
+		</body>`);
+		await page.addScriptTag({ content: pdfFigureRendererSrc });
+		const result = await page.evaluate(async () => {
+			const makeDocument = (pages, width = 400, height = 250) => ({
+				numPages: pages,
+				async getPage() {
+					return {
+						getViewport: ({ scale }) => ({ width: width * scale, height: height * scale }),
+						render: ({ canvasContext }) => {
+							canvasContext.fillStyle = "#fff";
+							canvasContext.fillRect(0, 0, 10, 10);
+							return { promise: Promise.resolve(), cancel() {} };
+						},
+						cleanup() {},
+					};
+				},
+				async destroy() {},
+			});
+			const seenDocumentOptions = [];
+			const pdfjs = {
+				getDocument(options) {
+					seenDocumentOptions.push(options);
+					const marker = options.data ? new TextDecoder().decode(options.data) : String(options.url);
+					const promise = marker.includes("fail")
+						? Promise.reject(new Error("fixture load failure"))
+						: Promise.resolve(marker === "huge" ? makeDocument(1, 10000, 2000) : makeDocument(marker === "multi" ? 2 : 1));
+					return { promise, async destroy() {} };
+				},
+			};
+			const rendered = await window.PiMarkdownPreviewPdfFigures.renderSinglePagePdfFigures(
+				document.getElementById("preview-root"),
+				{ documentOptions: { cMapUrl: "https://assets.invalid/cmaps/", wasmUrl: "https://assets.invalid/wasm/" }, inlinePdfData: { 0: "b25l", 1: "bXVsdGk=", 3: "aHVnZQ==", 4: "aGVpZ2h0", 6: "bGlua2Vk" }, loadPdfJs: async () => pdfjs },
+			);
+			const loaderFailure = await window.PiMarkdownPreviewPdfFigures.renderSinglePagePdfFigures(
+				document.getElementById("loader-failure"),
+				{ loadPdfJs: async () => { throw new Error("fixture module failure"); } },
+			);
+			const timeoutStartedAt = performance.now();
+			const loaderTimeout = await window.PiMarkdownPreviewPdfFigures.renderSinglePagePdfFigures(
+				document.getElementById("loader-timeout"),
+				{ loadPdfJs: () => new Promise(() => {}), timeoutMs: 20, totalTimeoutMs: 30 },
+			);
+			const delay = (milliseconds, value) => new Promise((resolve) => setTimeout(() => resolve(value), milliseconds));
+			const slowPdfjs = {
+				getDocument() {
+					const slowDocument = {
+						numPages: 1,
+						getPage: () => delay(40, {
+							getViewport: ({ scale }) => ({ width: 400 * scale, height: 250 * scale }),
+							render: () => ({ promise: delay(40), cancel() {} }),
+							cleanup() {},
+						}),
+						async destroy() {},
+					};
+					return { promise: delay(40, slowDocument), async destroy() {} };
+				},
+			};
+			const aggregateStartedAt = performance.now();
+			const aggregateTimeout = await window.PiMarkdownPreviewPdfFigures.renderSinglePagePdfFigures(
+				document.getElementById("aggregate-timeout"),
+				{ loadPdfJs: async () => slowPdfjs, timeoutMs: 100, totalTimeoutMs: 70 },
+			);
+			const link = document.querySelector("a.pdf-page-preview");
+			const canvas = link?.querySelector("canvas");
+			const hugeCanvas = document.querySelector("#huge canvas");
+			const heightLink = document.getElementById("height-only");
+			const heightCanvas = heightLink?.querySelector("canvas");
+			const outerLink = document.getElementById("outer-link");
+			const linkedWrapper = outerLink?.querySelector(".pdf-page-preview");
+			const linkedCanvas = linkedWrapper?.querySelector("canvas");
+			return {
+				rendered,
+				loaderFailure,
+				loaderTimeout,
+				loaderTimeoutElapsedMs: performance.now() - timeoutStartedAt,
+				aggregateTimeout,
+				aggregateTimeoutElapsedMs: performance.now() - aggregateStartedAt,
+				remainingEmbedIds: Array.from(document.querySelectorAll("#preview-root embed"), (element) => element.id),
+				unsafePdfRan: window.unsafePdfRan === true,
+				loaderFailureRetained: Boolean(document.getElementById("loader-failure-embed")),
+				loaderTimeoutRetained: Boolean(document.getElementById("loader-timeout-embed")),
+				aggregateTimeoutRetained: Boolean(document.getElementById("aggregate-timeout-embed")),
+				ordinaryLink: document.getElementById("ordinary-link")?.getAttribute("href"),
+				linkHref: link?.getAttribute("href"),
+				linkId: link?.id,
+				linkClasses: link ? Array.from(link.classList) : [],
+				linkWidth: link?.style.width,
+				linkTitle: link?.title,
+				linkLabel: link?.getAttribute("aria-label"),
+				canvasLabel: canvas?.getAttribute("aria-label"),
+				canvasSize: canvas ? [canvas.width, canvas.height] : null,
+				canvasStyleWidth: canvas?.style.width,
+				sizedLayout: link && canvas ? {
+					linkWidth: link.getBoundingClientRect().width,
+					canvasWidth: canvas.getBoundingClientRect().width,
+				} : null,
+				naturalLayout: linkedWrapper && linkedCanvas ? {
+					wrapperStyleWidth: linkedWrapper.style.width,
+					wrapperWidth: linkedWrapper.getBoundingClientRect().width,
+					canvasWidth: linkedCanvas.getBoundingClientRect().width,
+				} : null,
+				hugeCanvasSize: hugeCanvas ? [hugeCanvas.width, hugeCanvas.height] : null,
+				linkedFigure: {
+					href: outerLink?.getAttribute("href"),
+					nestedAnchorCount: outerLink?.querySelectorAll("a").length,
+					wrapperTag: outerLink?.querySelector(".pdf-page-preview")?.tagName,
+				},
+				heightOnlyLayout: heightLink && heightCanvas ? {
+					canvas: [heightCanvas.getBoundingClientRect().width, heightCanvas.getBoundingClientRect().height],
+					link: [heightLink.getBoundingClientRect().width, heightLink.getBoundingClientRect().height],
+					linkStyleWidth: heightLink.style.width,
+				} : null,
+				documentOptions: seenDocumentOptions.map(({ cMapUrl, isEvalSupported, wasmUrl }) => ({ cMapUrl, isEvalSupported, wasmUrl })),
+			};
+		});
+		assert.deepEqual(result.rendered, { status: "partial", total: 6, rendered: 4, multiPage: 1, failed: 1 });
+		assert.deepEqual(result.loaderFailure, { status: "failed", total: 1, rendered: 0, multiPage: 0, failed: 1 });
+		assert.deepEqual(result.loaderTimeout, { status: "failed", total: 1, rendered: 0, multiPage: 0, failed: 1 });
+		assert.ok(result.loaderTimeoutElapsedMs < 500, "A stalled PDF.js module load should return to the native embed promptly.");
+		assert.deepEqual(result.aggregateTimeout, { status: "failed", total: 1, rendered: 0, multiPage: 0, failed: 1 });
+		assert.ok(result.aggregateTimeoutElapsedMs < 180, "Stage timeouts should share one aggregate PDF rendering deadline.");
+		assert.deepEqual(result.remainingEmbedIds, ["unsafe-pdf", "multi", "failed", "non-pdf"], "Multi-page, failed, non-PDF, and unsafe-scheme embeds should remain native.");
+		assert.equal(result.unsafePdfRan, false, "PDF figure links must reject active URL schemes.");
+		assert.equal(result.loaderFailureRetained, true, "A PDF.js load failure should retain the native PDF embed.");
+		assert.equal(result.loaderTimeoutRetained, true, "A PDF.js load timeout should retain the native PDF embed.");
+		assert.equal(result.aggregateTimeoutRetained, true, "An aggregate PDF rendering timeout should retain the native PDF embed.");
+		assert.equal(result.ordinaryLink, "single.pdf", "Ordinary PDF links should remain unchanged.");
+		assert.equal(result.linkHref, "single.pdf#page=1&zoom=125", "Rendered PDF links should preserve exact fragments and query-like fragment parameters.");
+		assert.equal(result.linkId, "single");
+		assert.deepEqual(result.linkClasses, ["pdf-page-preview", "sized", "custom"]);
+		assert.equal(result.linkWidth, "25%");
+		assert.equal(result.linkTitle, "Authored title — Open the original PDF");
+		assert.equal(result.linkLabel, "Open PDF: Single caption");
+		assert.equal(result.canvasLabel, "Single caption");
+		assert.deepEqual(result.canvasSize, [534, 334]);
+		assert.equal(result.canvasStyleWidth, "100%", "Rendered PDF canvases should fill authored-width wrappers.");
+		assert.ok(Math.abs(result.sizedLayout.linkWidth - result.sizedLayout.canvasWidth) < 1, "Percentage-sized PDF canvases should fill their wrappers.");
+		assert.equal(result.naturalLayout.wrapperStyleWidth, "534px", "Natural PDF display widths should convert 72-point PDF units to 96-pixel CSS units.");
+		assert.ok(Math.abs(result.naturalLayout.wrapperWidth - result.naturalLayout.canvasWidth) < 1, "Naturally sized PDF canvases should fill their wrappers.");
+		assert.ok(result.hugeCanvasSize[0] < 10000 && result.hugeCanvasSize[0] * result.hugeCanvasSize[1] <= 8 * 1024 * 1024, "Oversized PDF pages should be downscaled beneath the per-canvas pixel cap.");
+		assert.deepEqual(result.linkedFigure, { href: "https://example.com/destination", nestedAnchorCount: 0, wrapperTag: "SPAN" }, "A PDF image with an authored outer link should retain that link without nesting a second anchor.");
+		assert.equal(result.heightOnlyLayout.linkStyleWidth, "fit-content");
+		assert.ok(Math.abs(result.heightOnlyLayout.canvas[0] - 320) < 1 && Math.abs(result.heightOnlyLayout.canvas[1] - 200) < 1, "Height-only PDF sizing should preserve the page aspect ratio.");
+		assert.ok(Math.abs(result.heightOnlyLayout.link[0] - result.heightOnlyLayout.canvas[0]) < 1, "A height-only PDF link should shrink-wrap its rendered canvas.");
+		assert.ok(result.documentOptions.every((options) => options.cMapUrl?.endsWith("/cmaps/") && options.wasmUrl?.endsWith("/wasm/") && options.isEvalSupported === false), "PDF.js decoder URLs should propagate while document-defined JavaScript remains disabled.");
+		assert.deepEqual(pageErrors, []);
+	} finally {
+		await browser.close();
+	}
+}
+
+await assertSinglePagePdfFigureRendering();
+
+async function assertBrowserWatchReload() {
+	const resourceRoot = await mkdtemp(join(tmpdir(), "pi-markdown-preview-watch-browser-"));
+	const pixelBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+	const absoluteImagePath = `${resourceRoot}-absolute.png`;
+	await writeFile(join(resourceRoot, "pixel.png"), pixelBytes);
+	await writeFile(absoluteImagePath, pixelBytes);
+	const server = await createBrowserWatchServer(
+		'<!doctype html><html><head></head><body><p>Initial watch document</p><script>window.previewTrustedScriptRan = true;</script></body></html>',
+		resourceRoot,
+	);
+	const { executablePath, args } = getPreviewBrowserLaunchOptions();
+	const browser = await puppeteer.launch({ headless: true, executablePath, args });
+	try {
+		const page = await browser.newPage();
+		await page.goto(server.url, { waitUntil: "domcontentloaded" });
+		await page.waitForFunction(() => window.location.search === "?revision=1");
+		assert.equal(await page.evaluate(() => window.previewTrustedScriptRan), true, "Nonce-bearing preview scripts should run under the watch CSP.");
+		assert.equal(await page.$eval("#pi-markdown-preview-watch-count", (element) => element.textContent), "1 of 1");
+
+		server.updateDocument('<!doctype html><html><head></head><body><p>Second watch document</p></body></html>');
+		await page.waitForFunction(() => window.location.search === "?revision=2" && document.body.textContent?.includes("Second watch document"));
+		assert.equal(await page.$eval("#pi-markdown-preview-watch-count", (element) => element.textContent), "2 of 2");
+
+		await page.goBack({ waitUntil: "domcontentloaded" });
+		await page.waitForFunction(() => window.location.search === "?revision=1" && document.body.textContent?.includes("Initial watch document"));
+		await page.goForward({ waitUntil: "domcontentloaded" });
+		await page.waitForFunction(() => window.location.search === "?revision=2" && document.body.textContent?.includes("Second watch document"));
+		await page.goBack({ waitUntil: "domcontentloaded" });
+		await page.waitForFunction(() => window.location.search === "?revision=1" && document.body.textContent?.includes("Initial watch document"));
+
+		server.updateDocument('<!doctype html><html><head></head><body><p>Third watch document</p></body></html>');
+		await page.waitForFunction(() => document.getElementById("pi-markdown-preview-watch-latest")?.textContent === "Latest (new)");
+		assert.equal(await page.evaluate(() => window.location.search), "?revision=1", "A historical response should not auto-follow a newly rendered response.");
+		assert.match(await page.$eval("body", (element) => element.textContent ?? ""), /Initial watch document/);
+
+		await page.click("#pi-markdown-preview-watch-next");
+		await page.waitForFunction(() => window.location.search === "?revision=2" && document.body.textContent?.includes("Second watch document"));
+		assert.equal(await page.$eval("#pi-markdown-preview-watch-count", (element) => element.textContent), "2 of 3");
+		await page.click("#pi-markdown-preview-watch-latest");
+		await page.waitForFunction(() => window.location.search === "?revision=3" && document.body.textContent?.includes("Third watch document"));
+
+		await page.keyboard.down("Alt");
+		await page.keyboard.press("ArrowLeft");
+		await page.keyboard.up("Alt");
+		await page.waitForFunction(() => window.location.search === "?revision=2" && document.body.textContent?.includes("Second watch document"));
+		await page.keyboard.down("Alt");
+		await page.keyboard.press("ArrowRight");
+		await page.keyboard.up("Alt");
+		await page.waitForFunction(() => window.location.search === "?revision=3" && document.body.textContent?.includes("Third watch document"));
+		const editableShortcutWasPrevented = await page.evaluate(() => {
+			const input = document.createElement("input");
+			document.body.appendChild(input);
+			input.focus();
+			const event = new KeyboardEvent("keydown", { key: "ArrowLeft", altKey: true, bubbles: true, cancelable: true });
+			input.dispatchEvent(event);
+			input.remove();
+			return event.defaultPrevented;
+		});
+		assert.equal(editableShortcutWasPrevented, false, "Revision shortcuts should not capture Option/Alt+Arrow inside editable fields.");
+
+		await page.setRequestInterception(true);
+		let captureNextNavigation = true;
+		let resolveAutoNavigation;
+		let rejectAutoNavigation;
+		const autoNavigationRequestPromise = new Promise((resolvePromise, rejectPromise) => {
+			resolveAutoNavigation = resolvePromise;
+			rejectAutoNavigation = rejectPromise;
+		});
+		const navigationTimeout = setTimeout(() => rejectAutoNavigation(new Error("Timed out waiting for auto-follow navigation.")), 5_000);
+		const onRequest = (request) => {
+			if (captureNextNavigation && request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+				captureNextNavigation = false;
+				clearTimeout(navigationTimeout);
+				resolveAutoNavigation(request);
+				return;
+			}
+			void request.continue().catch(() => {});
+		};
+		page.on("request", onRequest);
+		server.updateDocument('<!doctype html><html><head></head><body><p>Intermediate watch document</p></body></html>');
+		const autoNavigationRequest = await autoNavigationRequestPromise;
+		const autoNavigationUrl = new URL(autoNavigationRequest.url());
+		assert.equal(autoNavigationUrl.pathname, "/");
+		assert.equal(autoNavigationUrl.search, "", "Auto-follow should request the latest document rather than a revision that can become stale in flight.");
+		server.updateDocument('<!doctype html><html><head></head><body><p>Newest watch document</p></body></html>');
+		await autoNavigationRequest.continue();
+		await page.waitForFunction(() => window.location.search === "?revision=5" && document.body.textContent?.includes("Newest watch document"));
+		assert.equal(await page.$eval("#pi-markdown-preview-watch-count", (element) => element.textContent), "5 of 5");
+		page.off("request", onRequest);
+		await page.setRequestInterception(false);
+
+		server.updateDocument(`<!doctype html><html><head></head><body><h1 id="updated">Updated watch document</h1><a id="jump" href="#updated">Jump</a><a id="unsafe" href="javascript:window.previewUnsafeLinkRan = true">Unsafe</a><img id="relative-pixel" src="pixel.png" /><img id="absolute-pixel" src="${absoluteImagePath}" /></body></html>`);
+		await page.waitForFunction(() => window.location.search === "?revision=6" && document.body.textContent?.includes("Updated watch document"));
+		await page.waitForFunction(() => {
+			const images = [...document.querySelectorAll("img")];
+			return images.length === 2 && images.every((image) => image.complete && image.naturalWidth > 0);
+		});
+		assert.match(
+			await page.$eval("#absolute-pixel", (image) => image.getAttribute("src") ?? ""),
+			/^\/__pi_markdown_preview_absolute_image__\/[a-f\d]{64}$/,
+			"Browser watch should rewrite an explicit absolute image to its authenticated route.",
+		);
+		await page.click("#jump");
+		assert.equal(await page.evaluate(() => window.location.hash), "#updated", "Removing the file base should preserve in-page fragment links.");
+		await page.click("#unsafe");
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+		assert.notEqual(await page.evaluate(() => window.previewUnsafeLinkRan), true, "The watch CSP should block javascript links from rendered Markdown.");
+	} finally {
+		await browser.close();
+		await server.close();
+		await rm(resourceRoot, { recursive: true, force: true });
+		await rm(absoluteImagePath, { force: true });
+	}
+}
+
+await assertBrowserWatchReload();
+
+assert.ok(src.includes("const mermaidResult = await browserPage!.evaluate"), "Puppeteer rendering should read structured Mermaid status.");
+assert.ok(src.includes("throwIfMermaidRenderFailed(mermaidResult);"), "Puppeteer rendering should invoke the production Mermaid failure guard.");
+assert.doesNotMatch(
+	src,
+	/window\.__mermaidDone === true"[\s\S]{0,100}\.catch\(\(\) => \{\}\)/,
+	"Puppeteer rendering should not discard Mermaid readiness timeouts.",
+);
+
+const parseRgb = (value) => {
+	const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+	assert.equal(channels?.length, 3, `Expected an RGB color, received ${value}`);
+	return channels;
+};
+const relativeLuminance = (color) => {
+	const linear = color.map((channel) => {
+		const value = channel / 255;
+		return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+};
+const contrastRatio = (foreground, background) => {
+	const lighter = Math.max(relativeLuminance(parseRgb(foreground)), relativeLuminance(parseRgb(background)));
+	const darker = Math.min(relativeLuminance(parseRgb(foreground)), relativeLuminance(parseRgb(background)));
+	return (lighter + 0.05) / (darker + 0.05);
+};
+
+const mermaidIconFixture = [
+	"flowchart LR",
+	'  source@{ icon: "lucide:file-code-2", form: "rounded", label: "Source", pos: "b", h: 56 }',
+	'  payload@{ shape: "doc", label: "Payload" }',
+	'  store@{ shape: "cyl", label: "Store" }',
+	'  midtone@{ shape: "rounded", label: "Midtone" }',
+	'  github@{ icon: "logos:github-icon", form: "rounded", label: "GitHub", pos: "b", h: 56 }',
+	"  source -->|prepare| payload -->|persist| store -->|review| midtone -->|publish| github",
+	"  classDef unchanged fill:#f8f9fa,stroke:#868e96,stroke-width:2px",
+	"  classDef changed fill:#f3f0ff,stroke:#7950f2,stroke-width:2px",
+	"  classDef midtone fill:#808080,stroke:#666666,stroke-width:2px",
+	"  class source,store unchanged",
+	"  class payload,github changed",
+	"  class midtone midtone",
+].join("\n");
+
+async function renderMermaidBrowserFixture(theme, fixture, options = {}) {
+	const palette = theme === "dark"
+		? { background: "#0f1117", surface: "#171b24", text: "#e6edf3", line: "#9aa5b1" }
+		: { background: "#f5f7fb", surface: "#ffffff", text: "#1f2328", line: "#57606a" };
+	const mermaidConfig = {
+		startOnLoad: false,
+		theme: "base",
+		themeVariables: {
+			background: palette.background,
+			primaryColor: palette.surface,
+			primaryTextColor: palette.text,
+			secondaryColor: palette.surface,
+			secondaryTextColor: palette.text,
+			tertiaryColor: palette.surface,
+			tertiaryTextColor: palette.text,
+			textColor: palette.text,
+			lineColor: palette.line,
+			edgeLabelBackground: palette.surface,
+		},
+	};
+	const { executablePath, args } = getPreviewBrowserLaunchOptions();
+	const browser = await puppeteer.launch({ headless: true, executablePath, args });
+	try {
+		const page = await browser.newPage();
+		const consoleErrors = [];
+		page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+		const fixtureRoot = resolve(process.cwd(), "node_modules");
+		const servedFixtures = new Set();
+		const iconFixtures = new Map([
+			["/@iconify-json/lucide@1/icons.json", { name: "lucide", path: resolve(fixtureRoot, "@iconify-json/lucide/icons.json") }],
+			["/@iconify-json/logos@1/icons.json", { name: "logos", path: resolve(fixtureRoot, "@iconify-json/logos/icons.json") }],
+		]);
+		await page.setRequestInterception(true);
+		page.on("request", async (request) => {
+			const url = new URL(request.url());
+			const mermaidFixture = url.hostname === "cdn.jsdelivr.net" && url.pathname.startsWith("/npm/mermaid@11.16.0/")
+				? resolve(fixtureRoot, "mermaid", url.pathname.slice("/npm/mermaid@11.16.0/".length))
+				: undefined;
+			const iconFixture = url.hostname === "unpkg.com" ? iconFixtures.get(url.pathname) : undefined;
+			if (iconFixture && options.failIconPack === iconFixture.name) {
+				servedFixtures.add(`failed:${iconFixture.name}`);
+				return request.respond({
+					status: 503,
+					body: JSON.stringify({ error: "fixture unavailable" }),
+					contentType: "application/json",
+					headers: { "access-control-allow-origin": "*" },
+				});
+			}
+			const localPath = mermaidFixture ?? iconFixture?.path;
+			if (!localPath) {
+				if (url.hostname === "cdn.jsdelivr.net" || url.hostname === "unpkg.com") return request.abort("blockedbyclient");
+				return request.continue();
+			}
+			servedFixtures.add(mermaidFixture ? "mermaid" : iconFixture.name);
+			await request.respond({
+				body: await readFile(localPath),
+				contentType: localPath.endsWith(".json") ? "application/json" : "application/javascript",
+				headers: { "access-control-allow-origin": "*" },
+			});
+		});
+		const browserModule = buildMermaidBrowserModule(
+			JSON.stringify(mermaidConfig),
+			JSON.stringify([
+				{ name: "lucide", url: "https://unpkg.com/@iconify-json/lucide@1/icons.json" },
+				{ name: "logos", url: "https://unpkg.com/@iconify-json/logos@1/icons.json" },
+			]),
+		);
+		await page.setContent(`<!doctype html><body style="background:${palette.background};color:${palette.text}"><div id="preview-root" style="background:${palette.surface}"><pre class="mermaid"><code>${fixture}</code></pre></div><script type="module">${browserModule}\n(async () => { try { await renderMermaid(); } finally { window.__mermaidDone = true; } })();</script></body>`, { waitUntil: "domcontentloaded" });
+		await page.waitForFunction(() => window.__mermaidDone === true, { timeout: 30000 });
+		const result = await page.evaluate(() => {
+			const isOpaqueColor = (value) => {
+				const match = value.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/);
+				if (!match) return false;
+				const alphaMatch = value.match(/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)$/);
+				return !alphaMatch || Number(alphaMatch[1]) >= 1;
+			};
+			const findOpaqueFill = (root) => {
+				if (!(root instanceof Element)) return "";
+				const shape = Array.from(root.querySelectorAll("rect, polygon, path, circle, ellipse")).find((candidate) => (
+					isOpaqueColor(getComputedStyle(candidate).fill)
+				));
+				return shape ? getComputedStyle(shape).fill : "";
+			};
+			const findOpaqueBackground = (element) => {
+				let current = element instanceof Element ? element : null;
+				while (current) {
+					const background = getComputedStyle(current).backgroundColor;
+					if (current instanceof HTMLElement && isOpaqueColor(background)) return background;
+					current = current.parentElement;
+				}
+				return getComputedStyle(document.body).backgroundColor;
+			};
+			const edgeLabel = document.querySelector(".edgeLabel");
+			const failure = document.querySelector(".mermaid-error");
+			return {
+				mermaidRenderResult: window.__mermaidRenderResult ?? null,
+				failurePanel: failure ? { role: failure.getAttribute("role"), text: failure.textContent?.trim() } : null,
+				iconCount: document.querySelectorAll(".icon-shape svg").length,
+				edgeColor: edgeLabel ? getComputedStyle(edgeLabel).color : "",
+				bodyColor: getComputedStyle(document.body).color,
+				bodyBackground: getComputedStyle(document.body).backgroundColor,
+				previewRootBackground: getComputedStyle(document.querySelector("#preview-root")).backgroundColor,
+				iconNodes: Array.from(document.querySelectorAll(".icon-shape")).map((node) => {
+					const label = node.querySelector(".nodeLabel");
+					const icon = node.querySelector("svg");
+					return {
+						label: label?.textContent?.trim(),
+						labelColor: label ? getComputedStyle(label).color : "",
+						labelSurface: findOpaqueBackground(label),
+						iconColor: icon ? getComputedStyle(icon).color : "",
+						iconSurfaceFill: findOpaqueFill(node.firstElementChild),
+						hasPath: Boolean(icon?.querySelector("path")),
+					};
+				}),
+				shapeNodes: Array.from(document.querySelectorAll(".node:not(.icon-shape)")).map((node) => {
+					const label = node.querySelector(".nodeLabel");
+					const shape = Array.from(node.querySelectorAll("rect, polygon, path, circle, ellipse")).find((candidate) => {
+						const fill = getComputedStyle(candidate).fill;
+						return fill && fill !== "none" && fill !== "rgba(0, 0, 0, 0)";
+					});
+					return {
+						label: label?.textContent?.trim(),
+						labelColor: label ? getComputedStyle(label).color : "",
+						shapeFill: shape ? getComputedStyle(shape).fill : "",
+					};
+				}),
+			};
+		});
+		return { result, consoleErrors, servedFixtures };
+	} finally {
+		await browser.close();
+	}
+}
+
+async function assertMermaidIconBrowserRendering(theme) {
+	const { result, consoleErrors, servedFixtures } = await renderMermaidBrowserFixture(theme, mermaidIconFixture);
+	assert.deepEqual(result.mermaidRenderResult, { status: "success" }, `${theme} Mermaid fixture should report successful rendering.`);
+	assert.equal(result.failurePanel, null, `${theme} successful Mermaid rendering should not show a failure panel.`);
+	assert.ok(result.iconCount >= 2, `${theme} icon rendering should render icon SVGs rather than placeholders.`);
+	assert.deepEqual(result.iconNodes.map(({ label }) => label), ["Source", "GitHub"]);
+	assert.ok(result.iconNodes.every((node) => node.hasPath), `${theme} icon nodes should contain rendered SVG paths.`);
+	assert.deepEqual(result.shapeNodes.map(({ label }) => label), ["Payload", "Store", "Midtone"]);
+	assert.deepEqual(servedFixtures, new Set(["mermaid", "lucide", "logos"]), `${theme} fixture rendering should not use the network.`);
+	for (const node of result.iconNodes) {
+		assert.ok(contrastRatio(node.iconColor, node.iconSurfaceFill) >= 4.5, `${theme} icon glyphs should meet accessible contrast against their rendered shapes.`);
+		assert.ok(contrastRatio(node.labelColor, node.labelSurface) >= 4.5, `${theme} icon labels should meet accessible contrast against their rendered backgrounds.`);
+	}
+	for (const node of result.shapeNodes) {
+		assert.ok(contrastRatio(node.labelColor, node.shapeFill) >= 4.5, `${theme} shape labels should meet accessible contrast.`);
+	}
+	assert.ok(result.iconNodes.every((node) => node.iconSurfaceFill !== result.bodyBackground), `${theme} icon fixture shapes should differ from the page background.`);
+	assert.notEqual(result.previewRootBackground, result.bodyBackground, `${theme} preview card surface should differ from the page background.`);
+	assert.ok(result.iconNodes.every((node) => node.labelSurface === result.previewRootBackground), `${theme} icon labels should resolve the preview card as their nearest opaque background.`);
+	assert.equal(result.edgeColor, result.bodyColor, `${theme} edge labels should retain theme text color.`);
+	assert.ok(result.iconNodes.every((node) => node.labelColor !== result.edgeColor), `${theme} icon labels should remain semantically colored.`);
+	assert.notEqual(result.iconNodes[0]?.iconColor, result.iconNodes[1]?.iconColor, `${theme} gray and violet attribution icons should remain distinct.`);
+	assert.deepEqual(consoleErrors, [], `${theme} Mermaid rendering should not log console errors.`);
+	return result;
+}
+
+const darkMermaidResult = await assertMermaidIconBrowserRendering("dark");
+const lightMermaidResult = await assertMermaidIconBrowserRendering("light");
+assert.ok(
+	[...darkMermaidResult.iconNodes, ...lightMermaidResult.iconNodes].some((node) => node.iconColor !== node.labelColor),
+	"Surface-aware rendering should allow an icon glyph and label to use different compliant colors.",
+);
+
+async function assertMermaidFailurePropagation() {
+	const fixture = [
+		"flowchart LR",
+		'  source@{ icon: "lucide:file-code-2", form: "rounded", label: "Source", pos: "b", h: 56 }',
+	].join("\n");
+	const { result, consoleErrors, servedFixtures } = await renderMermaidBrowserFixture("dark", fixture, { failIconPack: "lucide" });
+	assert.equal(result.mermaidRenderResult?.status, "failed", "Failed icon-pack loading should produce failed Mermaid status.");
+	assert.match(result.mermaidRenderResult?.error ?? "", /Failed to load Mermaid icon pack lucide: HTTP 503/);
+	assert.equal(result.failurePanel?.role, "alert", "Failed Mermaid rendering should expose an alert panel.");
+	assert.match(result.failurePanel?.text ?? "", /Mermaid render failed: Failed to load Mermaid icon pack lucide: HTTP 503/);
+	assert.deepEqual(servedFixtures, new Set(["mermaid", "failed:lucide"]), "Failure fixture should remain network-isolated.");
+	assert.ok(consoleErrors.some((message) => message.includes("Mermaid render failed:")), "Failed Mermaid rendering should log a browser diagnostic.");
+	assert.throws(
+		() => throwIfMermaidRenderFailed(result.mermaidRenderResult),
+		/Mermaid render failed: Failed to load Mermaid icon pack lucide: HTTP 503/,
+		"The production Puppeteer failure guard should reject serialized failed Mermaid status.",
+	);
+}
+
+await assertMermaidFailurePropagation();
+
+function extractReadmeMermaidIconFixture(readmeSource) {
+	const heading = /^### Mermaid icons\s*$/m.exec(readmeSource);
+	assert.ok(heading, "README should contain a Mermaid icons section.");
+	const remainder = readmeSource.slice(heading.index + heading[0].length);
+	const nextHeading = /^#{1,3}\s+\S/m.exec(remainder);
+	const section = nextHeading ? remainder.slice(0, nextHeading.index) : remainder;
+	const fence = /```mermaid[^\n]*\r?\n([\s\S]*?)\r?\n```/.exec(section);
+	assert.ok(fence?.[1]?.trim(), "README Mermaid icons section should contain a non-empty Mermaid fence.");
+	return fence[1].trim();
+}
+
+const readmeSource = await readFile(new URL("../README.md", import.meta.url), "utf8");
+assert.match(readmeSource, /PDF icon nodes require Mermaid CLI 11\.6\+\./, "README should document the Mermaid CLI version required for PDF icons.");
+const readmeMermaidIconFixture = extractReadmeMermaidIconFixture(readmeSource);
+const readmeIconMetadataLines = readmeMermaidIconFixture.split("\n").filter((line) => line.includes(" icon: "));
+assert.equal(readmeIconMetadataLines.length, 2, "README Mermaid example should document both supported icon packs.");
+for (const line of readmeIconMetadataLines) {
+	assert.match(
+		line,
+		/@\{[^{}\r\n]*icon:\s*"(?:lucide|logos):[^"]+"[^{}\r\n]*\}\s*$/,
+		"README icon metadata declarations should remain on one source line.",
+	);
+}
+
+async function assertReadmeMermaidIconRendering(theme) {
+	const { result, consoleErrors, servedFixtures } = await renderMermaidBrowserFixture(theme, readmeMermaidIconFixture);
+	assert.deepEqual(result.mermaidRenderResult, { status: "success" }, `${theme} README Mermaid example should render successfully.`);
+	assert.equal(result.failurePanel, null, `${theme} README Mermaid example should not show a failure panel.`);
+	assert.equal(result.iconCount, 2, `${theme} README Mermaid example should render both documented icons.`);
+	assert.deepEqual(result.iconNodes.map(({ label }) => label), ["Source", "GitHub"]);
+	assert.ok(result.iconNodes.every((node) => node.hasPath), `${theme} README Mermaid icons should contain SVG paths.`);
+	assert.deepEqual(servedFixtures, new Set(["mermaid", "lucide", "logos"]), `${theme} README Mermaid example should remain network-isolated.`);
+	for (const node of result.iconNodes) {
+		assert.ok(contrastRatio(node.iconColor, node.iconSurfaceFill) >= 4.5, `${theme} README icon glyphs should meet accessible contrast.`);
+		assert.ok(contrastRatio(node.labelColor, node.labelSurface) >= 4.5, `${theme} README icon labels should meet accessible contrast.`);
+	}
+	assert.deepEqual(consoleErrors, [], `${theme} README Mermaid example should not log console errors.`);
+}
+
+await assertReadmeMermaidIconRendering("dark");
+await assertReadmeMermaidIconRendering("light");
+function collectExtensionRegistrations() {
+	const commands = [];
+	const commandDefinitions = new Map();
+	const toolDefinitions = [];
+	const events = [];
+	const pi = {
+		on(event) {
+			events.push(event);
+		},
+		registerCommand(name, definition) {
+			commands.push(name);
+			commandDefinitions.set(name, definition);
+		},
+		registerTool(definition) {
+			toolDefinitions.push(definition);
+		},
+	};
+	extensionFactory(pi);
+	return { commands, commandDefinitions, tools: toolDefinitions.map((definition) => definition.name), toolDefinitions, events };
+}
+
+const exportToolEnvName = "PI_MARKDOWN_PREVIEW_REGISTER_EXPORT_TOOL";
+const previousExportToolEnv = process.env[exportToolEnvName];
+try {
+	delete process.env[exportToolEnvName];
+	const defaultRegistrations = collectExtensionRegistrations();
+	assert.deepEqual(defaultRegistrations.events, ["agent_end", "agent_settled", "session_shutdown"], "Browser watch should prefer agent_settled, retain an agent_end fallback for compatible hosts, and clean up on session shutdown.");
+	assert.match(defaultRegistrations.commandDefinitions.get("preview-browser").description, /--watch\/-w starts or reopens response\/file watchers; --list and --stop manage them/, "The browser command description should advertise multi-watch lifecycle operations.");
+	assert.deepEqual(
+		defaultRegistrations.tools,
+		["preview_export"],
+		"preview_export should remain registered by default for backward compatibility.",
+	);
+	const previewExportParameters = defaultRegistrations.toolDefinitions[0].parameters;
+	assert.deepEqual(previewExportParameters.required, ["format"], "Only preview_export format should be required.");
+	assert.deepEqual(previewExportParameters.properties.format.enum, ["pdf", "html", "png"], "preview_export format should retain its enum values.");
+	assert.deepEqual(previewExportParameters.properties.source.enum, ["last_assistant", "file", "markdown"], "Optional preview_export source should retain its enum values.");
+	assert.deepEqual(previewExportParameters.properties.inputFormat.enum, ["markdown", "latex"], "Optional preview_export input format should retain its enum values.");
+	assert.equal(previewExportParameters.properties.source.type, "string", "Optional enum properties should remain string schemas.");
+	assert.equal(Check(previewExportParameters, { format: "pdf" }), true, "preview_export should accept required parameters without optional fields.");
+	assert.equal(Check(previewExportParameters, { format: "png", source: "file", path: "report.md", inputFormat: "markdown" }), true, "preview_export should accept valid optional enum values.");
+	assert.equal(Check(previewExportParameters, { format: "docx" }), false, "preview_export should reject invalid format values.");
+	assert.equal(Check(previewExportParameters, { format: "pdf", source: "other" }), false, "preview_export should reject invalid optional enum values.");
+	assert.equal(Check(previewExportParameters, { source: "file" }), false, "preview_export should continue requiring format.");
+	assert.equal(Check(previewExportParameters, { format: "pdf", unexpected: true }), false, "preview_export should continue rejecting additional properties.");
+
+	for (const disabledValue of ["0", "false", "FALSE", " no ", "off"]) {
+		process.env[exportToolEnvName] = disabledValue;
+		const registrations = collectExtensionRegistrations();
+		assert.deepEqual(
+			registrations.tools,
+			[],
+			`${exportToolEnvName}=${JSON.stringify(disabledValue)} should omit preview_export registration.`,
+		);
+		assert.deepEqual(
+			registrations.commands,
+			["preview", "preview-browser", "preview-pdf", "preview-clear-cache"],
+			"Disabling preview_export should not remove slash commands.",
+		);
+	}
+
+	process.env[exportToolEnvName] = "true";
+	assert.deepEqual(
+		collectExtensionRegistrations().tools,
+		["preview_export"],
+		`${exportToolEnvName}=true should explicitly enable preview_export registration.`,
+	);
+} finally {
+	if (previousExportToolEnv === undefined) {
+		delete process.env[exportToolEnvName];
+	} else {
+		process.env[exportToolEnvName] = previousExportToolEnv;
+	}
+}
+
+console.log("Regression checks passed.");

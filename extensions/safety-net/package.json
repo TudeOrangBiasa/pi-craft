@@ -1,0 +1,83 @@
+{
+  "name": "safety-net",
+  "version": "2.3.0",
+  "description": "A coding agent CLI hook - block destructive commands and secret file access",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./api": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "cc-safety-net": "dist/bin/cc-safety-net.js",
+    "ccsn": "dist/bin/cc-safety-net.js"
+  },
+  "files": [
+    "dist",
+    "THIRD_PARTY_LICENSES.txt"
+  ],
+  "scripts": {
+    "audit:dependencies": "bun audit",
+    "build": "bun run clean && bun run scripts/build.ts",
+    "build:types": "tsc --project tsconfig.build.json --emitDeclarationOnly --declaration",
+    "build:schema": "bun run scripts/build-schema.ts",
+    "verify:package": "bun run scripts/verify-package.ts",
+    "verify:repository-plugin": "bun run scripts/verify-repository-plugin.ts",
+    "verify:coverage": "bun run scripts/verify-coverage.ts",
+    "clean": "rm -rf dist",
+    "check": "bun run lint && bun run typecheck && bun run knip && bun run check-duplicates && bun run test:coverage && bun run verify:coverage",
+    "check:ci": "bun run lint:ci && bun run typecheck && bun run knip && bun run check-duplicates && bun run test:coverage && bun run verify:coverage",
+    "lint": "biome check --write",
+    "lint:ci": "biome ci .",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.gui.json --noEmit",
+    "knip": "knip-bun --production",
+    "check-duplicates": "bunx jscpd src tests --no-tips --exit-code 1 --reporters ai --ignore '**/*.svg'",
+    "test": "bun test",
+    "test:e2e": "bun test tests/e2e",
+    "test:e2e:stability": "bun test tests/e2e --randomize --rerun-each 3",
+    "test:e2e:live": "CC_SAFETY_NET_E2E_LIVE=1 bun test tests/e2e-live",
+    "test:coverage": "AGENT=1 bun test tests --path-ignore-patterns 'tests/e2e-live/**' --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "cc-safety-net": "bun run src/cli/cc-safety-net.ts"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@ampcode/plugin": "0.0.0-20260724002649-ga3413e7",
+    "@biomejs/biome": "2.3.10",
+    "@opencode-ai/plugin": "^1.18.3",
+    "@types/bun": "latest",
+    "jscpd": "^5.0.14",
+    "knip": "^6.32.0",
+    "lefthook": "^2.1.10",
+    "typescript": "7.0.2"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/pi/index.js"
+    ]
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "bun@1.4.0",
+  "keywords": [
+    "claude-code",
+    "opencode",
+    "safety",
+    "plugin",
+    "security",
+    "pi-package",
+    "cursor",
+    "amp",
+    "grok",
+    "grok-build"
+  ],
+  "gitHead": "5837fd3f459b021a7ba92bee3b60c369efb04612"
+}

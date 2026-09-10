@@ -1,0 +1,19 @@
+{
+  "name": "fff",
+  "version": "0.1.0",
+  "description": "FFF-powered fuzzy file finder (fffind) and content grep (ffgrep) for pi.",
+  "type": "module",
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "files": ["src"],
+  "dependencies": {
+    "@ff-labs/fff-node": "0.10.5"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  }
+}

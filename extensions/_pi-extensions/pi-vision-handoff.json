@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "visionModel": "google/gemini-3.1-flash-lite",
+  "autoHandoff": true
+}

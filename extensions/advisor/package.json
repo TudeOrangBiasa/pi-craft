@@ -1,0 +1,16 @@
+{
+  "name": "advisor",
+  "version": "0.1.0",
+  "description": "pi-advisor — a second-opinion advisor model the executor can consult for guidance before acting.",
+  "type": "module",
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}

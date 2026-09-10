@@ -1,0 +1,20 @@
+{
+  "name": "craft-harness",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "check": "oxfmt --check extensions/omfg extensions/bash-interceptor extensions/governor && oxlint --type-aware --type-check extensions/omfg extensions/bash-interceptor extensions/governor && bun test extensions/omfg/tests extensions/bash-interceptor/tests extensions/governor/tests",
+    "install": "bun installer/install.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "bun-types": "^1.4.2",
+    "oxfmt": "^0.67.0",
+    "oxlint": "^1.82.0",
+    "oxlint-tsgolint": "^7.0.2001"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

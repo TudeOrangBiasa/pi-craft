@@ -1,0 +1,12 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"overrides": [
+		{
+			"files": ["extensions/omfg/omfg.ts"],
+			"rules": {
+				"eslint/no-control-regex": "off",
+				"eslint/no-misleading-character-class": "off"
+			}
+		}
+	]
+}

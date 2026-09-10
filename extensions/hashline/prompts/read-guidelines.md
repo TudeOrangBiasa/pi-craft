@@ -1,0 +1,3 @@
+- `read`: call before `replace` when you need fresh anchors for a file.
+- `read`: call again after an edit when you need anchors you do not have — post-edit diff `+anchor│`/` anchor│` rows and `anchor_grep` hits are already fresh anchors for the changed range, so no new `read` needed for those lines.
+- `read`: use for listing directories and viewing file content instead of bash ls/cat/head/tail.

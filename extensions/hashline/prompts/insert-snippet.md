@@ -1,0 +1,1 @@
+Insert `lines` after/before bare anchor `aB3` from `aB3│content`: anchor stays, lines are bare without `│`, one per element

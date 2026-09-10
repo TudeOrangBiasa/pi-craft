@@ -1,0 +1,19 @@
+{
+	"name": "args",
+	"version": "0.1.0",
+	"description": "Pi extension. Shell-style $1 / $ARGUMENTS placeholders and !`cmd` / ```! shell substitution, expanded into your Pi skills at invocation.",
+	"type": "module",
+	"exports": {
+		".": "./index.ts"
+	},
+	"license": "MIT",
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"dependencies": {}
+}

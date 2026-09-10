@@ -1,0 +1,52 @@
+{
+  "name": "tool-repair",
+  "version": "0.2.3",
+  "description": "Validates and repairs malformed model tool calls before execution, including powershell coverage.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "tool-repair",
+    "open-models",
+    "kimi",
+    "deepseek",
+    "validate-then-repair",
+    "anchor-bleed",
+    "grammar-repair",
+    "dsml"
+  ],
+  "files": [
+    "*.ts",
+    "src/",
+    "docs/",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.3",
+    "@types/node": "25.9.1",
+    "@vitest/coverage-v8": "4.1.7",
+    "knip": "6.14.1",
+    "typebox": "1.3.7",
+    "typescript": "6.0.3",
+    "vitest": "4.1.7"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./tool-repair.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint:dead": "knip --no-gitignore"
+  }
+}

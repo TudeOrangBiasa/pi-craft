@@ -1,0 +1,21 @@
+{
+	"name": "ask",
+	"version": "0.1.0",
+	"description": "Pi extension. A structured questionnaire the model can put to you when it would otherwise guess, with typed options instead of free-form replies.",
+	"type": "module",
+	"exports": {
+		".": "./index.ts",
+		"./events": "./events.ts"
+	},
+	"license": "MIT",
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	},
+	"dependencies": {}
+}
