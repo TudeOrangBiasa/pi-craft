@@ -15,6 +15,11 @@ const PI = process.env.PI_CODING_AGENT_DIR?.trim() !== "" && process.env.PI_CODI
 // Single-file extensions (managed source: extensions/<name>/<name>.ts).
 const SINGLE_FILE = ["omfg.ts", "bash-interceptor.ts", "governor.ts"];
 
+// Extra sibling sources copied next to the entry file when it imports them.
+const SIBLING_SOURCES: Record<string, string[]> = {
+	"omfg.ts": ["guidance.ts"],
+};
+
 // Package extensions deployed to forks/ (settings.json already points there).
 // Opt-in packages ship too — dormant until added to settings packages.
 const PACKAGES = [
@@ -56,12 +61,17 @@ function main(): void {
 	// 1. Single-file extensions.
 	const deployedExts: string[] = [];
 	for (const file of SINGLE_FILE) {
-		const src = join(REPO, "extensions", file.replace(/\.ts$/, ""), file);
+		const dir = join(REPO, "extensions", file.replace(/\.ts$/, ""));
+		const src = join(dir, file);
 		if (!existsSync(src)) {
 			console.error(`missing extension source: ${src}`);
 			process.exit(1);
 		}
 		copyFileSync(src, join(extDir, file));
+		// Sibling sources the entry file imports (e.g. omfg.ts → guidance.ts).
+		for (const extra of SIBLING_SOURCES[file] ?? []) {
+			copyFileSync(join(dir, extra), join(extDir, extra));
+		}
 		deployedExts.push(join(extDir, file));
 		console.log(`installed extension: ${file}`);
 	}
