@@ -13,13 +13,13 @@ const PI = process.env.PI_CODING_AGENT_DIR?.trim() !== "" && process.env.PI_CODI
 	: join(homedir(), ".pi", "agent");
 
 // Single-file extensions (managed source: extensions/<name>/<name>.ts).
-const SINGLE_FILE = ["omfg.ts", "bash-interceptor.ts", "governor.ts"];
+const SINGLE_FILE = ["bash-interceptor.ts", "governor.ts"];
 
-// Extra sibling sources copied next to the entry file when it imports them.
-const SIBLING_SOURCES: Record<string, string[]> = {
-	"omfg.ts": ["guidance.ts"],
-};
-
+// Directory extensions: deployed as extensions/<name>/ with siblings intact.
+// (A sibling .ts next to a top-level entry would be loaded as its own
+// extension — rule 1 of discovery — so omfg ships as a directory with its
+// package.json manifest instead.)
+const DIR_EXTENSIONS = ["omfg"];
 // Package extensions deployed to forks/ (settings.json already points there).
 // Opt-in packages ship too — dormant until added to settings packages.
 const PACKAGES = [
@@ -58,22 +58,27 @@ function main(): void {
 	mkdirSync(extDir, { recursive: true });
 	mkdirSync(forksDir, { recursive: true });
 
-	// 1. Single-file extensions.
+	// 1. Single-file + directory extensions.
 	const deployedExts: string[] = [];
 	for (const file of SINGLE_FILE) {
-		const dir = join(REPO, "extensions", file.replace(/\.ts$/, ""));
-		const src = join(dir, file);
+		const src = join(REPO, "extensions", file.replace(/\.ts$/, ""), file);
 		if (!existsSync(src)) {
 			console.error(`missing extension source: ${src}`);
 			process.exit(1);
 		}
 		copyFileSync(src, join(extDir, file));
-		// Sibling sources the entry file imports (e.g. omfg.ts → guidance.ts).
-		for (const extra of SIBLING_SOURCES[file] ?? []) {
-			copyFileSync(join(dir, extra), join(extDir, extra));
-		}
 		deployedExts.push(join(extDir, file));
 		console.log(`installed extension: ${file}`);
+	}
+	for (const name of DIR_EXTENSIONS) {
+		const src = join(REPO, "extensions", name);
+		const dest = join(extDir, name);
+		if (!existsSync(join(src, "package.json"))) {
+			console.error(`missing manifest for directory extension: ${src}`);
+			process.exit(1);
+		}
+		copyTree(src, dest);
+		console.log(`installed directory extension: ${name}/`);
 	}
 
 	// 2. Package extensions + deps.
