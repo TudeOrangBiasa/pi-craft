@@ -113,6 +113,7 @@ function main(): void {
 		}
 		copyTree(src, join(PI, dir));
 	}
+	copyFileSync(join(REPO, "prompt", "APPEND_SYSTEM.md"), join(PI, "APPEND_SYSTEM.md"));
 	console.log("installed agents/, guidance/, APPEND_SYSTEM.md");
 
 	// 4. Merge extensions array (idempotent, preserves user entries + order).
