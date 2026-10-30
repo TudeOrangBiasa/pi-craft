@@ -7,7 +7,9 @@
   "exports": {
     ".": "./goal.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "typebox": "1.3.7"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   },
