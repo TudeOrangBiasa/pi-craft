@@ -24,7 +24,10 @@ The `rtk` optimizer is gone (see `docs/adr/0009-remove-rtk.md`): bash commands r
 ## Develop
 
 ```bash
-bun run check     # oxfmt + oxlint type-check + tests (owned trio)
+bun install                        # root devDeps (oxfmt, oxlint, types)
+bun install --cwd extensions/subagents   # nested suite peerDeps (@earendil-works/*)
+bun install --cwd extensions/goal        # nested suite dep (typebox)
+bun run check     # oxfmt + oxlint type-check + tests (owned trio + goal + installer + subagents)
 ```
 
 - Rules: `CODING_STANDARDS.md`. Vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`. Issues: GitHub issues.
