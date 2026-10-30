@@ -18,10 +18,13 @@ Restart Pi to load.
 - `guidance/` — 27 auto-injected guidance rules (TS + Go + Rust).
 - `agents/`, `prompt/APPEND_SYSTEM.md` — reviewer agents and the system-prompt append.
 
+## Removed: RTK
+
+The `rtk` optimizer is gone (see `docs/adr/0009-remove-rtk.md`): bash commands run verbatim and `governor` is the only output bound. The external `rtk` binary is now unused — remove it by hand if you want (`cargo uninstall rtk` or delete it from `~/.local/bin`); the agent never uninstalls it.
 ## Develop
 
 ```bash
 bun run check     # oxfmt + oxlint type-check + tests (owned trio)
 ```
 
-- Rules: `CODING_STANDARDS.md`. Vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`. Issues: `.scratch/`.
+- Rules: `CODING_STANDARDS.md`. Vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`. Issues: GitHub issues.

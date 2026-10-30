@@ -55,8 +55,6 @@ export function setFallbackSubagent(v: string | undefined): void { fallbackSubag
 /**
  * Build a registry map: DEFAULT_AGENTS first (unless disabled via settings),
  * then user agents overlaid on top (same name overrides the default).
- * Pure — callers that must not disturb the process-wide registry (nested
- * delegation resolving agents from its own config root) build their own map.
  */
 export function buildAgentRegistry(userAgents: Map<string, AgentConfig>): Map<string, AgentConfig> {
   const registry = new Map<string, AgentConfig>();
@@ -136,8 +134,6 @@ function resolveUnambiguousKeyIn(registry: Map<string, AgentConfig>, name: strin
 /**
  * The canonical key for a caller-supplied name that identifies exactly one
  * ENABLED agent, or undefined. Strict by construction: no fallback, no guessing
- * between case-variants. Nested delegation resolves with this directly, since
- * "unknown types are rejected rather than falling back" is its own contract.
  */
 export function resolveEnabledTypeIn(
   registry: Map<string, AgentConfig>,
@@ -159,9 +155,8 @@ export type SpawnTypeResolution =
 /**
  * Resolve a caller-supplied agent type against a registry, applying the
  * `fallbackSubagent` policy. The single decision point for every caller-supplied
- * spawn — the Agent tool, the scheduler, cross-extension RPC, and the nested
- * tools — so a type that fails here never reaches `runAgent`, where `getConfig`
- * would silently substitute general-purpose.
+ * spawn — the Agent tool — so a type that fails here never reaches `runAgent`,
+ * where `getConfig` would silently substitute general-purpose.
  *
  * Unknown, disabled, and case-ambiguous names are all treated the same way:
  * the caller named something that doesn't identify exactly one enabled agent.
@@ -256,26 +251,6 @@ export function getUserAgentNames(): string[] {
 /** Check if a type is valid and enabled (case-insensitive). */
 export function isValidType(type: string): boolean {
   return isValidTypeIn(agents, type);
-}
-
-/** Tool names required for memory management. */
-const MEMORY_TOOL_NAMES = ["read", "write", "edit"];
-
-/**
- * Get memory tool names (read/write/edit) not already in the provided set.
- */
-export function getMemoryToolNames(existingToolNames: Set<string>): string[] {
-  return MEMORY_TOOL_NAMES.filter(n => !existingToolNames.has(n));
-}
-
-/** Tool names needed for read-only memory access. */
-const READONLY_MEMORY_TOOL_NAMES = ["read"];
-
-/**
- * Get read-only memory tool names not already in the provided set.
- */
-export function getReadOnlyMemoryToolNames(existingToolNames: Set<string>): string[] {
-  return READONLY_MEMORY_TOOL_NAMES.filter(n => !existingToolNames.has(n));
 }
 
 /** Get built-in tool names for a type (case-insensitive). */

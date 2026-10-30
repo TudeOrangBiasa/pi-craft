@@ -31,6 +31,15 @@ describe("governor bound", () => {
     expect(r.text.startsWith("l0")).toBe(false);
   });
 
+  test("2000-line bash output is cut to last 500 + notice", () => {
+    const r = boundText(big(2000), tailModeFor("bash"));
+    expect(r.truncated).toBe(true);
+    expect(r.keptLines).toBe(500);
+    expect(r.totalLines).toBe(2000);
+    expect(r.text).toContain("l1999");
+    expect(r.text).toContain("…[truncated by governor:");
+  });
+
   test("byte limit can cut before line limit", () => {
     const r = boundText(big(100, 2000), "head");
     expect(r.truncated).toBe(true);

@@ -1,7 +1,7 @@
 /**
- * structured-output.ts — the synthetic tool behind `agent(prompt, { schema })`.
+ * structured-output.ts — the synthetic tool behind `structuredOutput`.
  *
- * A workflow script that passes a `schema` wants an *object* back, not prose it
+ * A caller that passes a `schema` wants an *object* back, not prose it
  * has to parse. Claude Code does this by giving the child a `StructuredOutput`
  * tool whose input schema is the caller's schema, so the provider fills the
  * fields, and returning the validated payload as the agent's result.
@@ -26,7 +26,7 @@
  */
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { CompiledSchema } from "./workflow/json-schema.js";
+import type { CompiledSchema } from "./json-schema.js";
 
 /**
  * Deliberately NOT added to `SUBAGENT_TOOL_NAMES`: that list becomes

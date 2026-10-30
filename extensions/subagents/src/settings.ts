@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { NO_FALLBACK } from "./agent-types.js";
-import type { AgentMentionMode, JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
+import type { JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
 
 export interface SubagentsSettings {
   maxConcurrent?: number;
@@ -23,13 +23,10 @@ export interface SubagentsSettings {
    * pool would let a saturated pool starve the main session of work it could
    * have done itself.
    *
-   * Bounds only spawns a caller is blocking on inline. Nested children are
-   * exempt — their parent is blocked awaiting them, so queueing a child behind
-   * its own parent would deadlock — and so are detached spawns from
-   * cross-extension RPC or `@handle` mentions, which block nobody and are
-   * documented to start immediately. Foreground `resume` is also outside the
-   * pool: it reuses an existing session and never reaches the spawn path, so
-   * several blocking resumes in one message can still exceed the limit.
+   * Bounds only spawns a caller is blocking on inline. Foreground `resume`
+   * is also outside the pool: it reuses an existing session and never reaches
+   * the spawn path, so several blocking resumes in one message can still
+   * exceed the limit.
    */
   maxConcurrentForeground?: number;
   /**
@@ -38,6 +35,14 @@ export interface SubagentsSettings {
    * `/agents` → Settings input prompt explicitly says "0 = unlimited".
    */
   defaultMaxTurns?: number;
+  /**
+   * Default wall-clock ceiling for one subagent run, in ms. 0/unset = no
+   * timeout — the default, preserving today's unbounded behavior. A per-agent
+   * `timeout_ms:` frontmatter overrides this in both directions: it sets the
+   * ceiling for that agent, and there is no per-agent opt-out of a project
+   * default (a timeout only ever ends a hung run, never a healthy one).
+   */
+  defaultTimeoutMs?: number;
   graceTurns?: number;
   defaultJoinMode?: JoinMode;
   /**
@@ -47,23 +52,15 @@ export interface SubagentsSettings {
    * the previous behaviour, where an unqualified spawn blocked the turn and
    * returned its result inline.
    *
-   * Top-level only. Nested spawns (a subagent spawning its own) always default
-   * to foreground regardless of this setting — see `nested-tools.ts`, where a
-   * detached child would be killed by `abortOwnedChildren` when its parent
-   * settles, with no notification path to deliver its result.
-   *
    * An explicit `run_in_background` on the call, or in the agent file's
    * frontmatter, overrides this in both directions; the setting only decides
    * what "unspecified" means.
    */
   backgroundByDefault?: boolean;
   /**
-   * Master switch for the schedule subagent feature. Defaults to `true`.
-   * When `false`: the `Agent` tool's `schedule` param + its guideline are
-   * stripped from the tool spec at registration (zero LLM-context cost), the
-   * scheduler doesn't bind to the session, and the `/agents → Scheduled jobs`
-   * menu entry is hidden. Schema-level removal applies at extension load
-   * (next pi session); runtime menu/runtime-fire short-circuit is immediate.
+   * Legacy key, ignored. Scheduling was removed: the `Agent` tool has no
+   * `schedule` param and no scheduler binds to the session. Kept on the
+   * interface (and sanitized) so old configs load without complaint.
    */
   schedulingEnabled?: boolean;
   /**
@@ -125,31 +122,16 @@ export interface SubagentsSettings {
    */
   fleetView?: boolean;
   /**
-   * Whether `@handle message` typed at the prompt is routed to that subagent
-   * instead of the main model, and whether `@` offers running agents alongside
-   * pi's file completion. Defaults to `model`. Applied live.
-   *
-   *   - `model`: mentioning an agent that is not running asks the main model to
-   *     spawn it with the `Agent` tool, Claude Code's behaviour. Costs a turn,
-   *     and the model writes the agent's prompt rather than your text being it.
-   *   - `direct`: that agent is started here instead, with the typed message as
-   *     its prompt and no main-model turn spent.
-   *   - `off`: the input hook falls straight through and the stacked
-   *     autocomplete provider delegates everything back to pi's built-in one.
-   *
-   * Messaging a running agent and resuming a finished one are direct in both
-   * `model` and `direct`. The legacy booleans are still accepted: `true` reads
-   * as `model`, `false` as `off`.
+   * Legacy key, ignored. Agent mentions were removed: `@handle` text goes to
+   * the main model as ordinary text. Kept on the interface (and sanitized)
+   * so old configs load without complaint.
    */
-  agentMentions?: AgentMentionMode;
+  agentMentions?: unknown;
   /**
-   * Whether subagents persist their pi session by default, so `@handle` can
-   * reopen an agent's conversation long after its in-memory record is gone.
-   * Defaults to `true`. Per-agent `persist_session:` frontmatter overrides it
-   * in both directions. Turning it off restores the previous behaviour, where
-   * a handle stops resolving roughly ten minutes after the agent finishes and
-   * mentioning it starts a fresh run instead. Persisted sessions also appear
-   * nested under the spawning session in pi's `/resume`.
+   * Whether subagents persist their pi session by default. Defaults to `true`.
+   * Per-agent `persist_session:` frontmatter overrides it in both directions.
+   * Persisted sessions also appear nested under the spawning session in
+   * pi's `/resume`.
    */
   rememberAgents?: boolean;
   /**
@@ -157,7 +139,7 @@ export interface SubagentsSettings {
    *   - `all`: show every agent (foreground + background).
    *   - `background`: hide foreground agents — they already render inline as the
    *     Agent tool result, so the widget would otherwise double-render them
-   *     (#118); everything else (background, queued, scheduled, RPC) stays.
+   *     (#118); everything else (background, queued) stays.
    *   - `off`: hide the widget entirely.
    * Defaults to `background`. Pure-UI and applied live (toggling refreshes the
    * widget).
@@ -170,8 +152,8 @@ export interface SubagentsSettings {
    * project (e.g. a repo that shouldn't leave run transcripts on disk for backup
    * or DLP tooling to ingest). A custom agent's `output_transcript` frontmatter
    * overrides this per agent. This governs only the transcript — it does NOT
-   * affect the persisted pi session (`persist_session`), worktree commits
-   * (`isolation: worktree`), or memory files.
+   * affect the persisted pi session (`persist_session`) or worktree commits
+   * (`isolation: worktree`).
    */
   outputTranscript?: boolean;
   /**
@@ -193,36 +175,18 @@ export interface SubagentsSettings {
    * Deliberately a downgrade rather than an error. The fail-loud rule covers
    * worktrees that *cannot* be created; this is the user declining one, and
    * throwing would reject exactly the calls that the `isolation: "off"` value
-   * exists to tolerate. Enforced below the tool boundary, so it also covers the
-   * scheduler and the unvalidated cross-extension RPC path.
+   * exists to tolerate.
    */
   worktreeIsolation?: boolean;
   /**
-   * Master switch for scripted workflows. Defaults to `true`.
-   *
-   * Off is not a soft hide: the `SubagentWorkflow` tool is never registered, so
-   * the model is not told it exists and cannot call it, the `/agents`
-   * Workflows entry is hidden, and `--subagents-workflow-file` is refused.
-   *
-   * Absent is not the same as `true`. Unset means *auto*: on, but yielding to
-   * another extension that already offers a workflow tool, because two
-   * orchestrators in one tool spec is a worse default than none — the model
-   * has to guess which to call, and pays for both descriptions to find out.
-   * Setting it explicitly pins the answer in both directions: `true` keeps
-   * ours whatever else is loaded, `false` is off regardless. See
-   * `resolveWorkflowCollisions` in index.ts.
-   *
-   * Read once at extension init, before registration, so flipping it in
-   * `/agents → Settings` takes effect on the next pi session — the same
-   * contract `schedulingEnabled` has, and for the same reason: a tool spec is
-   * fixed once pi has it.
+   * Legacy key, ignored. Scripted workflows were removed: `SubagentWorkflow`
+   * is never registered. Kept on the interface (and sanitized) so old configs
+   * load without complaint.
    */
   workflowsEnabled?: boolean;
   /**
-   * Hard ceiling on nested subagent delegation, counted from the main session:
-   * main = 0, its subagents = 1, their children = 2. Defaults to `2`; `0` or `1`
-   * disables nesting project-wide. Read when a subagent session is built, so a
-   * change applies to agents started after it.
+   * Legacy key, ignored. Nested subagents were removed: depth is fixed at 1.
+   * Kept on the interface (and sanitized) so old configs load without complaint.
    */
   maxSubagentDepth?: number;
   /**
@@ -311,22 +275,19 @@ export interface SettingsAppliers {
   setMaxConcurrent: (n: number) => void;
   setMaxConcurrentForeground: (n: number) => void;
   setDefaultMaxTurns: (n: number) => void;
+  setDefaultTimeoutMs: (n: number | undefined) => void;
   setGraceTurns: (n: number) => void;
   setDefaultJoinMode: (mode: JoinMode) => void;
   setBackgroundByDefault: (b: boolean) => void;
-  setSchedulingEnabled: (b: boolean) => void;
   setScopeModels: (enabled: boolean) => void;
   setStrictAgentFiles: (b: boolean) => void;
   setDisableDefaultAgents: (b: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setFleetView: (b: boolean) => void;
-  setAgentMentions: (mode: AgentMentionMode) => void;
   setRememberAgents: (b: boolean) => void;
   setWidgetMode: (mode: WidgetMode) => void;
   setOutputTranscript: (b: boolean) => void;
   setWorktreeIsolation: (b: boolean) => void;
-  setWorkflowsEnabled: (b: boolean) => void;
-  setMaxSubagentDepth: (n: number) => void;
   setFallbackSubagent: (v: string | undefined) => void;
   setReportUsage: (b: boolean) => void;
   setShowCost: (b: boolean) => void;
@@ -338,10 +299,18 @@ export interface SettingsAppliers {
 export type SettingsEmit = (event: string, payload: unknown) => void;
 
 const VALID_JOIN_MODES: ReadonlySet<string> = new Set<JoinMode>(["async", "group", "smart"]);
-const VALID_TOOL_DESCRIPTION_MODES: ReadonlySet<string> = new Set<ToolDescriptionMode>(["full", "compact", "custom"]);
+const VALID_TOOL_DESCRIPTION_MODES: ReadonlySet<string> = new Set<ToolDescriptionMode>([
+  "full",
+  "compact",
+  "custom",
+]);
 const VALID_WIDGET_MODES: ReadonlySet<string> = new Set<WidgetMode>(["all", "background", "off"]);
-const VALID_VIEWER_MARKDOWN_MODES: ReadonlySet<string> = new Set<ViewerMarkdownMode>(["off", "assistant", "all"]);
-const VALID_AGENT_MENTION_MODES: ReadonlySet<string> = new Set<AgentMentionMode>(["model", "direct", "off"]);
+const VALID_VIEWER_MARKDOWN_MODES: ReadonlySet<string> = new Set<ViewerMarkdownMode>([
+  "off",
+  "assistant",
+  "all",
+]);
+const VALID_AGENT_MENTION_MODES: ReadonlySet<string> = new Set<string>(["model", "direct", "off"]);
 
 // Sanity ceilings — prevent hand-edited configs from asking for values that
 // make no operational sense (e.g. 1e6 concurrent subagents). Permissive enough
@@ -350,6 +319,7 @@ const MAX_CONCURRENT_CEILING = 1024;
 const MAX_TURNS_CEILING = 10_000;
 const GRACE_TURNS_CEILING = 1_000;
 const SUBAGENT_DEPTH_CEILING = 16;
+const TIMEOUT_MS_CEILING = 86_400_000;
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
 function sanitize(raw: unknown): SubagentsSettings {
@@ -380,6 +350,13 @@ function sanitize(raw: unknown): SubagentsSettings {
     out.defaultMaxTurns = r.defaultMaxTurns as number;
   }
   if (
+    Number.isInteger(r.defaultTimeoutMs) &&
+    (r.defaultTimeoutMs as number) >= 0 &&
+    (r.defaultTimeoutMs as number) <= TIMEOUT_MS_CEILING
+  ) {
+    out.defaultTimeoutMs = r.defaultTimeoutMs as number;
+  }
+  if (
     Number.isInteger(r.graceTurns) &&
     (r.graceTurns as number) >= 1 &&
     (r.graceTurns as number) <= GRACE_TURNS_CEILING
@@ -399,6 +376,7 @@ function sanitize(raw: unknown): SubagentsSettings {
   if (typeof r.backgroundByDefault === "boolean") {
     out.backgroundByDefault = r.backgroundByDefault;
   }
+  // Legacy keys, ignored downstream — sanitized only so old configs load.
   if (typeof r.schedulingEnabled === "boolean") {
     out.schedulingEnabled = r.schedulingEnabled;
   }
@@ -411,7 +389,10 @@ function sanitize(raw: unknown): SubagentsSettings {
   if (typeof r.disableDefaultAgents === "boolean") {
     out.disableDefaultAgents = r.disableDefaultAgents;
   }
-  if (typeof r.toolDescriptionMode === "string" && VALID_TOOL_DESCRIPTION_MODES.has(r.toolDescriptionMode)) {
+  if (
+    typeof r.toolDescriptionMode === "string" &&
+    VALID_TOOL_DESCRIPTION_MODES.has(r.toolDescriptionMode)
+  ) {
     out.toolDescriptionMode = r.toolDescriptionMode as ToolDescriptionMode;
   }
   if (typeof r.fleetView === "boolean") {
@@ -421,8 +402,11 @@ function sanitize(raw: unknown): SubagentsSettings {
   // previously-written `true` means "on", which is now the default `model`.
   if (typeof r.agentMentions === "boolean") {
     out.agentMentions = r.agentMentions ? "model" : "off";
-  } else if (typeof r.agentMentions === "string" && VALID_AGENT_MENTION_MODES.has(r.agentMentions)) {
-    out.agentMentions = r.agentMentions as AgentMentionMode;
+  } else if (
+    typeof r.agentMentions === "string" &&
+    VALID_AGENT_MENTION_MODES.has(r.agentMentions)
+  ) {
+    out.agentMentions = r.agentMentions;
   }
   if (typeof r.rememberAgents === "boolean") {
     out.rememberAgents = r.rememberAgents;
@@ -448,6 +432,7 @@ function sanitize(raw: unknown): SubagentsSettings {
   if (typeof r.viewerMarkdown === "string" && VALID_VIEWER_MARKDOWN_MODES.has(r.viewerMarkdown)) {
     out.viewerMarkdown = r.viewerMarkdown as ViewerMarkdownMode;
   }
+  // Legacy key, ignored downstream — sanitized only so old configs load.
   if (typeof r.workflowsEnabled === "boolean") {
     out.workflowsEnabled = r.workflowsEnabled;
   }
@@ -516,18 +501,19 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
     appliers.setMaxConcurrentForeground(s.maxConcurrentForeground);
   }
   if (typeof s.defaultMaxTurns === "number") appliers.setDefaultMaxTurns(s.defaultMaxTurns);
+  if (typeof s.defaultTimeoutMs === "number")
+    appliers.setDefaultTimeoutMs(s.defaultTimeoutMs === 0 ? undefined : s.defaultTimeoutMs);
   if (typeof s.graceTurns === "number") appliers.setGraceTurns(s.graceTurns);
-  if (typeof s.maxSubagentDepth === "number") appliers.setMaxSubagentDepth(s.maxSubagentDepth);
   if (typeof s.fallbackSubagent === "string") appliers.setFallbackSubagent(s.fallbackSubagent);
   if (s.defaultJoinMode) appliers.setDefaultJoinMode(s.defaultJoinMode);
-  if (typeof s.backgroundByDefault === "boolean") appliers.setBackgroundByDefault(s.backgroundByDefault);
-  if (typeof s.schedulingEnabled === "boolean") appliers.setSchedulingEnabled(s.schedulingEnabled);
+  if (typeof s.backgroundByDefault === "boolean")
+    appliers.setBackgroundByDefault(s.backgroundByDefault);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
   if (typeof s.strictAgentFiles === "boolean") appliers.setStrictAgentFiles(s.strictAgentFiles);
-  if (typeof s.disableDefaultAgents === "boolean") appliers.setDisableDefaultAgents(s.disableDefaultAgents);
+  if (typeof s.disableDefaultAgents === "boolean")
+    appliers.setDisableDefaultAgents(s.disableDefaultAgents);
   if (s.toolDescriptionMode) appliers.setToolDescriptionMode(s.toolDescriptionMode);
   if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);
-  if (s.agentMentions) appliers.setAgentMentions(s.agentMentions);
   if (typeof s.rememberAgents === "boolean") appliers.setRememberAgents(s.rememberAgents);
   if (s.widgetMode) appliers.setWidgetMode(s.widgetMode);
   if (typeof s.outputTranscript === "boolean") appliers.setOutputTranscript(s.outputTranscript);
@@ -536,7 +522,6 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   if (typeof s.showCost === "boolean") appliers.setShowCost(s.showCost);
   if (typeof s.showModel === "boolean") appliers.setShowModel(s.showModel);
   if (s.viewerMarkdown) appliers.setViewerMarkdown(s.viewerMarkdown);
-  if (typeof s.workflowsEnabled === "boolean") appliers.setWorkflowsEnabled(s.workflowsEnabled);
 }
 
 /**

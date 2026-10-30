@@ -22,5 +22,5 @@
 			]
 		}
 	},
-	"include": ["extensions/omfg", "extensions/bash-interceptor", "extensions/governor"]
+	"include": ["extensions/omfg", "extensions/bash-interceptor", "extensions/governor", "extensions/goal", "installer"]
 }

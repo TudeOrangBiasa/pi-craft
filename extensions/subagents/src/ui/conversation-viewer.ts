@@ -310,8 +310,7 @@ export class ConversationViewer implements Component {
     const toolUses = this.activity?.toolUses ?? this.record.toolUses;
     if (toolUses > 0) headerParts.unshift(`${toolUses} tool${toolUses === 1 ? "" : "s"}`);
     // Spend from the record, context from the live session: the record is the
-    // only total that survives the agent finishing and the only one carrying a
-    // nested child's spend.
+    // only total that survives the agent finishing.
     const tokens = getLifetimeTotal(this.record.lifetimeUsage);
     if (tokens > 0) {
       const percent = getSessionContextPercent(this.activity?.session);

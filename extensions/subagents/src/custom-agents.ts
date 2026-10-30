@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
-import type { AgentConfig, IsolationMode, MemoryScope, ThinkingLevel } from "./types.js";
+import type { AgentConfig, IsolationMode, ThinkingLevel } from "./types.js";
 
 /**
  * The one thing a declared `name:` may not contain, matching Claude Code
@@ -47,9 +47,9 @@ export function loadCustomAgents(cwd: string, strict = false): Map<string, Agent
   const projectDir = join(cwd, ".pi", "agents");
 
   const agents = new Map<string, AgentConfig>();
-  loadFromDir(globalDir, agents, "global", strict);            // lowest priority
+  loadFromDir(globalDir, agents, "global", strict); // lowest priority
   loadFromDir(workspaceProjectDir, agents, "project", strict); // shared workspace
-  loadFromDir(projectDir, agents, "project", strict);          // highest priority (overwrites)
+  loadFromDir(projectDir, agents, "project", strict); // highest priority (overwrites)
 
   warnedLastLoad = warnedThisLoad;
   warnedThisLoad = new Set();
@@ -57,12 +57,17 @@ export function loadCustomAgents(cwd: string, strict = false): Map<string, Agent
 }
 
 /** Load agent configs from a directory into the map. */
-function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "project" | "global", strict: boolean): void {
+function loadFromDir(
+  dir: string,
+  agents: Map<string, AgentConfig>,
+  source: "project" | "global",
+  strict: boolean,
+): void {
   if (!existsSync(dir)) return;
 
   let files: string[];
   try {
-    files = readdirSync(dir).filter(f => f.endsWith(".md"));
+    files = readdirSync(dir).filter((f) => f.endsWith(".md"));
   } catch {
     return;
   }
@@ -88,8 +93,8 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       // under its filename, so `Agent({subagent_type})` would succeed against
       // an agent whose declared identity nothing honoured.
       warnIfNew(
-        `Agent file ${path} declares name "${declared}", which contains "${RESERVED_IN_TYPE}" — reserved for `
-        + "plugin-scoped identifiers. Rename it, or move the label to `display_name:`. Skipping.",
+        `Agent file ${path} declares name "${declared}", which contains "${RESERVED_IN_TYPE}" — reserved for ` +
+          "plugin-scoped identifiers. Rename it, or move the label to `display_name:`. Skipping.",
       );
       // No `warnSkippedOverride`: this file would have registered under its
       // *declared* name, which nothing else can hold (a colon keeps it out of
@@ -103,6 +108,20 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
     const name = declared || filenameType;
 
     const { builtinToolNames, extSelectors } = parseToolsField(fm.tools);
+
+    // Removed surfaces (#6): `allowed_subagents` (nested subagents) and `memory:`
+    // (persistent agent memory) are ignored. Old files keep loading — warn once
+    // per file rather than failing.
+    if (fm.allowed_subagents !== undefined && fm.allowed_subagents !== null) {
+      warnIfNew(
+        `Agent file ${path} sets "allowed_subagents", which is no longer supported — nested subagents were removed, so the key is ignored.`,
+      );
+    }
+    if (fm.memory !== undefined && fm.memory !== null) {
+      warnIfNew(
+        `Agent file ${path} sets "memory", which is no longer supported — persistent agent memory was removed, so the key is ignored.`,
+      );
+    }
 
     agents.set(name, {
       name,
@@ -121,18 +140,17 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       model: str(fm.model),
       thinking: str(fm.thinking) as ThinkingLevel | undefined,
       maxTurns: nonNegativeInt(fm.max_turns),
+      timeoutMs: timeoutToMs(fm.timeout_ms ?? fm.timeout),
       persistSession: fm.persist_session != null ? fm.persist_session === true : undefined,
       outputTranscript: fm.output_transcript != null ? fm.output_transcript !== false : undefined,
       sessionDir: str(fm.session_dir),
-      allowedSubagents: parseAllowedSubagents(fm.allowed_subagents),
       systemPrompt: body.trim(),
       promptMode: fm.prompt_mode === "append" ? "append" : "replace",
       inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
       runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
       isolated: fm.isolated != null ? fm.isolated === true : undefined,
-      memory: parseMemory(fm.memory),
       isolation: parseIsolation(fm.isolation),
-      enabled: fm.enabled !== false,  // default true; explicitly false disables
+      enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
       sourcePath: path,
     });
@@ -166,11 +184,16 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
  * content — normalising it at the boundary keeps one behaviour across the whole
  * supported peer range instead of forking on what happens to be installed.
  */
-export function parseAgentFrontmatter<T extends Record<string, unknown>>(content: string): { frontmatter: T; body: string } {
+export function parseAgentFrontmatter<T extends Record<string, unknown>>(
+  content: string,
+): { frontmatter: T; body: string } {
   return parseFrontmatter<T>(content.startsWith("\uFEFF") ? content.slice(1) : content);
 }
 
-function readAgentFile(path: string, strict: boolean): { frontmatter: Record<string, unknown>; body: string } | undefined {
+function readAgentFile(
+  path: string,
+  strict: boolean,
+): { frontmatter: Record<string, unknown>; body: string } | undefined {
   try {
     return parseAgentFrontmatter<Record<string, unknown>>(readFileSync(path, "utf-8"));
   } catch (err) {
@@ -221,6 +244,21 @@ function str(val: unknown): string | undefined {
 function nonNegativeInt(val: unknown): number | undefined {
   return typeof val === "number" && val >= 0 ? val : undefined;
 }
+/**
+ * Parse a `timeout_ms:` / `timeout:` frontmatter value into milliseconds.
+ * A plain number is ms; a string takes an optional `ms`/`s`/`m` suffix
+ * ("90s", "10m", "500") defaulting to ms. 0/unparsable = no timeout.
+ */
+function timeoutToMs(val: unknown): number | undefined {
+  if (val === undefined || val === null) return undefined;
+  if (typeof val === "number") return Number.isFinite(val) && val > 0 ? val : undefined;
+  const m = String(val).trim().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/i);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!(n > 0)) return undefined;
+  const unit = (m[2] ?? "ms").toLowerCase();
+  return Math.round(n * (unit === "m" ? 60_000 : unit === "s" ? 1_000 : 1));
+}
 
 /**
  * Parse a raw CSV field value into items, or undefined if absent/empty/"none".
@@ -229,24 +267,11 @@ function parseCsvField(val: unknown): string[] | undefined {
   if (val === undefined || val === null) return undefined;
   const s = String(val).trim();
   if (!s || s === "none") return undefined;
-  const items = s.split(",").map(t => t.trim()).filter(Boolean);
+  const items = s
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
   return items.length > 0 ? items : undefined;
-}
-
-/**
- * Parse the nested-delegation allowlist. Single field, default-off:
- * omitted/empty/"none"/`false` → undefined (no nested tools); "all"/"*"/`true`
- * → "all" (any enabled agent); csv → only the listed types.
- *
- * Booleans are accepted because `extensions:`/`skills:` take them and users
- * generalize: without this, YAML's `true` stringifies into an agent type
- * literally named "true", so the tools appear and every spawn is refused.
- */
-function parseAllowedSubagents(val: unknown): "all" | string[] | undefined {
-  if (typeof val === "boolean") return val ? "all" : undefined;
-  const items = parseCsvField(val);
-  if (!items) return undefined;
-  return items.some(i => i === "*" || i.toLowerCase() === "all") ? "all" : items;
 }
 
 /**
@@ -265,12 +290,15 @@ function csvList(val: unknown, defaults: string[]): string[] {
  * selectors parsed later by the runner. omitted → all built-ins, no selectors.
  * `tools:` present with only `ext:` entries → zero built-ins (use `*`).
  */
-function parseToolsField(val: unknown): { builtinToolNames: string[]; extSelectors: string[] | undefined } {
+function parseToolsField(val: unknown): {
+  builtinToolNames: string[];
+  extSelectors: string[] | undefined;
+} {
   const entries = csvList(val, BUILTIN_TOOL_NAMES);
   const isWildcard = (e: string) => e === "*" || e.toLowerCase() === "all";
   const hasWildcard = entries.some(isWildcard);
-  const plain = entries.filter(e => !isWildcard(e) && !e.startsWith("ext:"));
-  const extEntries = entries.filter(e => e.startsWith("ext:"));
+  const plain = entries.filter((e) => !isWildcard(e) && !e.startsWith("ext:"));
+  const extEntries = entries.filter((e) => e.startsWith("ext:"));
   return {
     builtinToolNames: hasWildcard ? [...new Set([...BUILTIN_TOOL_NAMES, ...plain])] : plain,
     extSelectors: extEntries.length > 0 ? extEntries : undefined,
@@ -283,15 +311,6 @@ function parseToolsField(val: unknown): { builtinToolNames: string[]; extSelecto
  */
 function csvListOptional(val: unknown): string[] | undefined {
   return parseCsvField(val);
-}
-
-/**
- * Parse a memory scope field.
- * omitted → undefined; "user"/"project"/"local" → MemoryScope.
- */
-function parseMemory(val: unknown): MemoryScope | undefined {
-  if (val === "user" || val === "project" || val === "local") return val;
-  return undefined;
 }
 
 /**

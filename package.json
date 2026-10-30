@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "check": "oxfmt --check extensions/omfg extensions/bash-interceptor extensions/governor && oxlint --type-aware --type-check extensions/omfg extensions/bash-interceptor extensions/governor && bun test extensions/omfg/tests extensions/bash-interceptor/tests extensions/governor/tests",
+    "check": "oxfmt --check extensions/omfg extensions/bash-interceptor extensions/governor extensions/goal installer && oxlint --type-aware --type-check extensions/omfg extensions/bash-interceptor extensions/governor extensions/goal && bun test extensions/omfg/tests extensions/bash-interceptor/tests extensions/governor/tests extensions/goal/tests installer/tests extensions/subagents/tests",
     "install": "bun installer/install.ts"
   },
   "devDependencies": {

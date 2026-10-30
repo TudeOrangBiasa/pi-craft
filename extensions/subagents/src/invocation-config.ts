@@ -2,12 +2,11 @@ import { Type } from "@sinclair/typebox";
 import type { AgentConfig, IsolationMode, JoinMode, ThinkingLevel } from "./types.js";
 
 /**
- * The model-facing `isolation` parameter, shared by the `Agent` tool and the
- * nested delegation tool so the two cannot drift.
+ * The model-facing `isolation` parameter for the `Agent` tool schema.
  *
  * Shape matters more than wording here. As a single-value optional literal,
  * models that fill every optional parameter — the transcript on #231 shows one
- * emitting `resume: ""`, `schedule: ""` and `model: "default"` alongside it —
+ * emitting `resume: ""`, `isolated: ""` and `model: "default"` alongside it —
  * had only `"worktree"` available to fill it with, and kept spawning worktrees
  * across three turns while their own reasoning said to omit the field. Every
  * other optional parameter has an inert filler; this one did not. `"off"` is
@@ -42,12 +41,11 @@ const isolationParamShape = {
  * for a project whose model passes `"worktree"` on *every* call, so a
  * per-result "isolation was disabled" note would be noise on every result and
  * would keep raising the salience of a capability that isn't there. With no
- * field there is nothing to pass, nothing to drop, and nothing to explain — the
- * same trade `scheduleParam` makes for disabled scheduling, at zero LLM-context
- * cost. The resolver gate and the `agent-manager` check still cover the paths a
- * schema can't reach: agent files, the scheduler, and cross-extension RPC.
+ * field there is nothing to pass, nothing to drop, and nothing to explain, at
+ * zero LLM-context cost. The resolver gate and the `agent-manager` check still
+ * cover the path a schema can't reach: agent files.
  *
- * Like `scheduleParam`, this is read once at tool registration — flipping the
+ * Read once at tool registration — flipping the
  * setting needs a new pi session for the schema to change.
  */
 export function isolationParam(enabled: boolean): Partial<typeof isolationParamShape> {
@@ -62,11 +60,9 @@ interface AgentInvocationParams {
   inherit_context?: boolean;
   isolated?: boolean;
   /**
-   * Untyped on purpose. Both tool schemas now build this field conditionally
-   * and spread it, which erases TypeBox's literal inference to `unknown` (the
-   * `schedule` param has the same shape). The resolver below narrows by
-   * comparison rather than trusting the declaration, which also makes it safe
-   * for the cross-extension RPC path, where options arrive unvalidated.
+   * Untyped on purpose. The tool schema builds this field conditionally and
+   * spreads it, which erases TypeBox's literal inference to `unknown`. The
+   * resolver below narrows by comparison rather than trusting the declaration.
    */
   isolation?: unknown;
 }
@@ -84,11 +80,8 @@ interface ResolveOptions {
    * What an unqualified spawn means — neither the call nor the agent file said.
    *
    * Top-level callers pass the `backgroundByDefault` setting (default `true`,
-   * following Claude Code). Nested callers pass `false` unconditionally: a
-   * detached child is killed by `abortOwnedChildren` when its parent settles
-   * and has no notification path of its own, so backgrounding one loses its
-   * work. Both call sites pass it explicitly; the `false` fallback only covers
-   * a caller that supplies no options at all, which in-tree means tests.
+   * following Claude Code). The `false` fallback only covers a caller that
+   * supplies no options at all, which in-tree means tests.
    */
   defaultRunInBackground?: boolean;
 }

@@ -111,9 +111,9 @@ const FENCE = /^---[ \t]*$/;
  * endings instead of rewriting CRLF to LF. Returns undefined when there is no
  * usable block.
  */
-function splitFrontmatter(content: string):
-  | { lines: string[]; openIdx: number; closeIdx: number; eol: string }
-  | undefined {
+function splitFrontmatter(
+  content: string,
+): { lines: string[]; openIdx: number; closeIdx: number; eol: string } | undefined {
   const lines = content.split(/(?<=\n)/);
   if (lines.length === 0) return undefined;
   // The BOM stays where it is — it belongs to the file, not the block — so the
@@ -243,16 +243,16 @@ export function serializeAgentFile(cfg: AgentConfig): string {
   if (cfg.model) fmFields.push(`model: ${cfg.model}`);
   if (cfg.thinking) fmFields.push(`thinking: ${cfg.thinking}`);
   if (cfg.maxTurns) fmFields.push(`max_turns: ${cfg.maxTurns}`);
-  if (cfg.allowedSubagents !== undefined) {
-    fmFields.push(`allowed_subagents: ${cfg.allowedSubagents === "all" ? "all" : cfg.allowedSubagents.join(", ")}`);
-  }
+  if (cfg.timeoutMs) fmFields.push(`timeout_ms: ${cfg.timeoutMs}`);
   fmFields.push(`prompt_mode: ${cfg.promptMode}`);
   if (cfg.extensions === false) fmFields.push("extensions: false");
   else if (Array.isArray(cfg.extensions)) fmFields.push(`extensions: ${cfg.extensions.join(", ")}`);
-  if (cfg.excludeExtensions?.length) fmFields.push(`exclude_extensions: ${cfg.excludeExtensions.join(", ")}`);
+  if (cfg.excludeExtensions?.length)
+    fmFields.push(`exclude_extensions: ${cfg.excludeExtensions.join(", ")}`);
   if (cfg.skills === false) fmFields.push("skills: false");
   else if (Array.isArray(cfg.skills)) fmFields.push(`skills: ${cfg.skills.join(", ")}`);
-  if (cfg.disallowedTools?.length) fmFields.push(`disallowed_tools: ${cfg.disallowedTools.join(", ")}`);
+  if (cfg.disallowedTools?.length)
+    fmFields.push(`disallowed_tools: ${cfg.disallowedTools.join(", ")}`);
   if (cfg.inheritContext) fmFields.push("inherit_context: true");
   // Both cases, not just `true`: with `backgroundByDefault` on, omitting the
   // field means background, so `false` is the only way to pin an agent file to
@@ -262,7 +262,6 @@ export function serializeAgentFile(cfg: AgentConfig): string {
   if (cfg.runInBackground !== undefined) fmFields.push(`run_in_background: ${cfg.runInBackground}`);
   if (cfg.outputTranscript === false) fmFields.push("output_transcript: false");
   if (cfg.isolated) fmFields.push("isolated: true");
-  if (cfg.memory) fmFields.push(`memory: ${cfg.memory}`);
   if (cfg.isolation) fmFields.push(`isolation: ${cfg.isolation}`);
 
   return `---\n${fmFields.join("\n")}\n---\n\n${cfg.systemPrompt}\n`;

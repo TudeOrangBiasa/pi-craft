@@ -1,0 +1,19 @@
+{
+  "name": "goal",
+  "version": "0.1.0",
+  "description": "Craft-harness extension. Claude Code-style autonomous goal loop: /goal, idle-gated continuation, goal_complete/goal_blocked.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./goal.ts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./goal.ts"
+    ]
+  }
+}

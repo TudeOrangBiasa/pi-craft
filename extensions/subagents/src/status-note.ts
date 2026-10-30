@@ -1,11 +1,6 @@
 /**
  * status-note.ts — Honest framing for an agent result: the parenthetical status
  * note for a non-normal outcome, and the salvaged partial output of a failure.
- *
- * Lives here rather than in an index.ts closure because both entry points need
- * it — the top-level tools and the nested delegation tools, which can't import
- * from index.ts (that is the extension entry, and it already reaches these tools
- * through agent-runner).
  */
 
 import type { AgentRecord } from "./types.js";
@@ -27,6 +22,10 @@ export function getStatusNote(status: string): string {
       return " (aborted — hit the turn limit before completion; output may be incomplete)";
     case "steered":
       return " (wrapped up at the turn limit — output may be partial)";
+    case "interrupted":
+      return " (INTERRUPTED by a reload or restart before completion — output is partial; resume the agent to continue)";
+    case "timeout":
+      return " (timed out — hit its wall-clock limit before completion; output may be incomplete)";
     default:
       return "";
   }
@@ -60,8 +59,8 @@ export function getStatusNote(status: string): string {
  * raises its salience. Two instructions were tried here and cut: "re-spawn with
  * a higher max_turns" (pushes a fresh multi-minute run to save one wasted tool
  * call) and, on `stopped`, "ask before restarting it" (restates the lead, and
- * presumes someone is present to ask — false under `pi -p`, in scheduled jobs,
- * and in any background-driven run). Nothing here can measure whether wording
+ * presumes someone is present to ask — false under `pi -p` and in any
+ * background-driven run). Nothing here can measure whether wording
  * improves parent behavior, so removing a false cue (which cannot induce new
  * behavior) and adding an instruction (which can) are not equally safe bets.
  * Don't add either back without a way to measure it.
@@ -74,6 +73,8 @@ export function getForegroundOutcomeNote(status: string): string {
       return " (aborted at the turn limit — everything the agent produced is above; the task is unfinished)";
     case "steered":
       return " (wrapped up at the turn limit — everything the agent produced is above; the task may be unfinished)";
+    case "timeout":
+      return " (timed out — everything the agent produced is above; the task is unfinished)";
     default:
       return "";
   }

@@ -13,11 +13,6 @@ import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-
 /**
  * Project/global default for writing a subagent's `.output` transcript; a custom
  * agent's `output_transcript` overrides it per agent.
- *
- * State lives here rather than in an index.ts closure because both spawn paths
- * need it — the top-level Agent tool and the nested delegation tools. Same
- * reason `scopeModels` lives in model-scope.ts: a setting only one path can read
- * is a setting the other path silently ignores.
  */
 let outputTranscriptDefault = true;
 
@@ -40,9 +35,6 @@ export function encodeCwd(cwd: string): string {
 /**
  * The per-session scratch directory, created if missing.
  * Mirrors Claude Code's layout: /tmp/{prefix}-{uid}/{encoded-cwd}/{sessionId}/tasks
- *
- * Shared with the workflow tool, which persists each invocation's script here so
- * iterating on one is edit-file-then-rerun — the same convention, one directory.
  */
 export function sessionTaskDir(cwd: string, sessionId: string): string {
   const encoded = encodeCwd(cwd);

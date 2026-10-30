@@ -6,7 +6,7 @@ TypeScript + Bun. See `CODING_STANDARDS.md` (toolchain, lint, monadic style, ext
 
 ### Issue tracker
 
-Issues live as local markdown under `.scratch/`. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues on `TudeOrangBiasa/pi-craft`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
