@@ -10,7 +10,7 @@ wrong.
 ```
 
 The file is optional — with no config at all, every setting takes its default. This
-package only ever *reads* the file; it never creates, writes or chmods it, so its
+package only ever _reads_ the file; it never creates, writes or chmods it, so its
 permissions are whatever you give it.
 
 A complete example:
@@ -56,12 +56,12 @@ type are likewise dropped back to their default without a warning.
 
 ## Settings
 
-| Setting | What it does | Default |
-| --- | --- | --- |
-| `collapseKey` | Key that collapses and expands the dialog overlay. | `"ctrl+]"` |
-| `guidance.description` | Full text of the tool description the model sees. Replaces the built-in default entirely — no merging. | built-in description |
-| `guidance.promptSnippet` | One-line snippet describing the tool in the system prompt. | built-in snippet |
-| `guidance.promptGuidelines` | List of usage guidelines given to the model. | 4 built-in guidelines |
+| Setting                     | What it does                                                                                           | Default               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------- |
+| `collapseKey`               | Key that collapses and expands the dialog overlay.                                                     | `"ctrl+]"`            |
+| `guidance.description`      | Full text of the tool description the model sees. Replaces the built-in default entirely — no merging. | built-in description  |
+| `guidance.promptSnippet`    | One-line snippet describing the tool in the system prompt.                                             | built-in snippet      |
+| `guidance.promptGuidelines` | List of usage guidelines given to the model.                                                           | 4 built-in guidelines |
 
 ### `collapseKey`
 
@@ -109,8 +109,8 @@ tool, so changes take effect on the next Pi restart.
 
 ## Environment variables
 
-| Variable | Effect |
-| --- | --- |
+| Variable          | Effect                                                                |
+| ----------------- | --------------------------------------------------------------------- |
 | `XDG_CONFIG_HOME` | Relocates the config directory, as described above. Must be absolute. |
 
 `LANG` and `LC_ALL` influence the dialog language, but they are read by

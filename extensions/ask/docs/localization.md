@@ -33,17 +33,17 @@ strings at render time, so an open questionnaire follows the change. Both `/lang
 
 Nine locale files ship in `locales/`:
 
-| Code | Language |
-| --- | --- |
-| `de` | Deutsch |
-| `en` | English |
-| `es` | Español |
-| `fr` | Français |
-| `pt` | Português |
+| Code    | Language           |
+| ------- | ------------------ |
+| `de`    | Deutsch            |
+| `en`    | English            |
+| `es`    | Español            |
+| `fr`    | Français           |
+| `pt`    | Português          |
 | `pt-BR` | Português (Brasil) |
-| `ru` | Русский |
-| `uk` | Українська |
-| `zh` | 中文 |
+| `ru`    | Русский            |
+| `uk`    | Українська         |
+| `zh`    | 中文               |
 
 ## What is translated, and what is not
 
@@ -56,7 +56,7 @@ header on the Submit tab, the
 external-editor failure notification, and the two RPC dialog prompts. Twenty-six keys in total,
 all under the namespace `pi-ask-user-question`.
 
-Everything the *model* reads stays English by design: the tool description, the parameter
+Everything the _model_ reads stays English by design: the tool description, the parameter
 schema descriptions, error messages, and the reserved-label list. Those are prompt inputs,
 not UI, and translating them would change model behavior rather than your reading
 experience. It also means reserved-label validation compares against fixed English

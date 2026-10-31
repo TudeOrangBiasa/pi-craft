@@ -5,7 +5,7 @@
  * Extracted from the GLM 5.1 vision-handoff pipeline in pi-umans-provider and
  * generalized: instead of a hardcoded describer, the user picks any
  * vision-capable model from the registry via an interactive picker, and the
- * choice is persisted to ~/.pi/agent/extensions/pi-vision-handoff.json.
+ * choice is persisted to the pi-craft.json `vision` section.
  *
  * Pipeline (provider-agnostic via @earendil-works/pi-ai's complete()):
  *   before_agent_start → warm the description cache for attached images AND
@@ -942,7 +942,7 @@ async function handleHandoffCommand(ctx: ExtensionCommandContext, args: string):
         "  /vision-handoff clear          Clear the configured vision model",
         "  /vision-handoff help           This message",
         "",
-        "Config: ~/.pi/agent/extensions/pi-vision-handoff.json",
+        "Config: ~/.pi/agent/pi-craft.json (`vision` section)",
         "Mechanism: before_agent_start warms a description cache; tool_result loads",
         "  read images through a dataloader (one batched vision call); context swaps",
         "  image blocks in the payload for the cached text description.",

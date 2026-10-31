@@ -13,7 +13,7 @@ import { guidanceDir, guidanceNotice, loadGuidanceDir, matchGuidance } from "./g
 import type { GuidanceRule } from "./guidance.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readSection, writeSection } from "./pi-craft-settings.js";
 
 // ---------------------------------------------------------------------------
 // TTSR - Time Travelling Stream Rules
@@ -68,8 +68,8 @@ interface ChatMessage {
   [key: string]: unknown;
 }
 
-// Single source of truth for the persisted rules path (~/.config/omfg/rules.json,
-// XDG_CONFIG_HOME-aware).
+// Old rules path (~/.config/omfg/rules.json, XDG_CONFIG_HOME-aware). Read
+// once as a fallback, then migrated into the unified `omfg` section.
 function rulesFile(): string {
   const xdg = process.env.XDG_CONFIG_HOME;
   const dir = xdg ? join(xdg, "omfg") : join(homedir(), ".config", "omfg");
@@ -95,13 +95,10 @@ function isValidRule(r: unknown): r is Rule {
 }
 function loadRules(): void {
   try {
-    const p = rulesFile();
-    if (!existsSync(p)) {
-      rules = [];
-      return;
-    }
-    const data = JSON.parse(readFileSync(p, "utf-8"));
-    const loaded: unknown[] = Array.isArray(data?.rules) ? data.rules : [];
+    const section = readSection("omfg", rulesFile());
+    // Old file shape is {rules: [...]}; the unified section keeps that same
+    // shape, so a migrated section reads back identically.
+    const loaded: unknown[] = Array.isArray(section.rules) ? section.rules : [];
     // Drop hand-edited shape-invalid entries instead of throwing per-event.
     rules = loaded.filter(isValidRule).map((r) => ({ ...r, enabled: r.enabled ?? true }));
   } catch {
@@ -110,10 +107,7 @@ function loadRules(): void {
 }
 function saveRules(): void {
   try {
-    const p = rulesFile();
-    const dir = p.slice(0, p.lastIndexOf("/"));
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(p, JSON.stringify({ rules }, null, 2), "utf-8");
+    writeSection("omfg", { rules });
   } catch {
     // non-fatal: in-memory state still works for the session
   }
@@ -305,13 +299,13 @@ Usage:
   /omfg apply <name> [--from <msgId>]   # time-travel: rewind to msgId and govern history
   /omfg applied                          # list session-applied rules
   /omfg rewind <msgId>                   # navigate session tree to an entry
-  /omfg reload                           # re-read rules.json
+  /omfg reload                           # re-read rules from pi-craft.json
   /omfg help
 
 Rule types: redact (mask matches), replace (swap matches), gate (block on match),
             inject (prefix/suffix), transform (built-in text transforms).
 Scopes: live (streaming), post (finalized message/tool), context (history before LLM call).
-Rules persist to ~/.config/omfg/rules.json.`;
+Rules persist to the pi-craft.json omfg section.`;
 
 function notify(
   ctx: ExtensionCommandContext,

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { readSection } from "./pi-craft-settings.js";
 
 export const GRAMMAR_NAMES = [
   "dsml",
@@ -96,18 +97,24 @@ export const DEFAULT_GRAMMAR_REPAIR_CONFIG: GrammarRepairConfig = {
   debug: Boolean(process.env.PI_TOOL_REPAIR_DEBUG),
 };
 
-export function loadGrammarRepairConfig(path = defaultConfigPath()): GrammarRepairConfig {
-  if (!existsSync(path)) return { ...DEFAULT_GRAMMAR_REPAIR_CONFIG };
+export function loadGrammarRepairConfig(path?: string): GrammarRepairConfig {
+  const target = path ?? defaultConfigPath();
+  // Explicit path: read that file exactly as before (test seam). Default
+  // path: read the unified section, migrating from the old file once.
+  const useUnified = path === undefined;
+  if (!useUnified && !existsSync(target)) return { ...DEFAULT_GRAMMAR_REPAIR_CONFIG };
 
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as ExtensionFileConfig | Partial<GrammarRepairConfig>;
+    const parsed = useUnified
+      ? readSection("tool-repair", target)
+      : (JSON.parse(readFileSync(target, "utf8")) as ExtensionFileConfig | Partial<GrammarRepairConfig>);
     const raw = isObject(parsed) && "grammarRepair" in parsed
       ? (parsed as ExtensionFileConfig).grammarRepair ?? {}
       : parsed;
     return normalizeGrammarRepairConfig(raw as Partial<GrammarRepairConfig>);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[pi-tool-repair] Failed to read grammar repair config at ${path}: ${message}\n`);
+    process.stderr.write(`[pi-tool-repair] Failed to read grammar repair config at ${target}: ${message}\n`);
     return { ...DEFAULT_GRAMMAR_REPAIR_CONFIG };
   }
 }

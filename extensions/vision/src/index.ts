@@ -1,24 +1,25 @@
 /**
  * Shared constants, types, and utilities for vision.
  *
- * Config lives at ~/.pi/agent/extensions/pi-vision-handoff.json — the same
- * convention pi-model-sort uses for picker-backed extensions.
+ * Config lives in the unified pi-craft.json `vision` section. The old
+ * extensions/pi-vision-handoff.json path stays as a fallback and migrates
+ * once on first read.
  */
 
 import type { ImageContent, TextContent, ThinkingLevel } from "@earendil-works/pi-ai";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveAgentDir } from "./agent-dir.js";
+import { readSection, writeSection } from "./pi-craft-settings.js";
 
 export * from "./usage.js";
 
-/** Subdirectory under the pi agent dir where picker extensions store config. */
+/** Subdirectory under the pi agent dir where the old config file lived. */
 const CONFIG_SUBDIR = "extensions";
 
-/** Config file name. */
+/** Old config file name (fallback only; new writes go to pi-craft.json). */
 export const CONFIG_FILENAME = "pi-vision-handoff.json";
 
-/** Full config path: ~/.pi/agent/extensions/pi-vision-handoff.json */
+/** Old config path: ~/.pi/agent/extensions/pi-vision-handoff.json */
 export function getConfigPath(): string {
   return join(resolveAgentDir(), CONFIG_SUBDIR, CONFIG_FILENAME);
 }
@@ -309,27 +310,15 @@ export function normalizeConfig(raw: unknown): VisionHandoffConfig {
   return base;
 }
 
-/** Read config from disk (falls back to defaults on missing/corrupt file). */
+/** Read config from the unified file (falls back to defaults on missing/corrupt file). */
 export function readConfig(): VisionHandoffConfig {
-  const path = getConfigPath();
-  if (!existsSync(path)) return { ...DEFAULT_CONFIG };
-  try {
-    const raw = readFileSync(path, "utf8");
-    return normalizeConfig(JSON.parse(raw));
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
+  const section = readSection("vision", getConfigPath());
+  return normalizeConfig(section);
 }
 
-/** Write config to disk. Creates the directory if needed. Returns the path written. */
+/** Write config to the unified file, keeping sibling sections. Returns the path written. */
 export function writeConfig(config: VisionHandoffConfig): string {
-  const path = getConfigPath();
-  const dir = join(resolveAgentDir(), CONFIG_SUBDIR);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf8");
-  return path;
+  return writeSection("vision", { ...config });
 }
 
 export interface ExtractedImage {

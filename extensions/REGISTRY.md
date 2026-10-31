@@ -1,6 +1,6 @@
 # Extension registry
 
-Every extension in `extensions/` with owner, role, and status. Core = default roster (11 packages + 3 single-file). Opt-in = `web` only, enable via settings.
+Every extension in `extensions/` with owner, role, and status. Core = default roster (10 packages + 3 single-file). Opt-in = `web` only, enable via settings.
 
 ## Owned (source of truth here, tested)
 
@@ -21,7 +21,6 @@ Every extension in `extensions/` with owner, role, and status. Core = default ro
 | `vision` | Vision for text-only models | core |
 | `safety-net` | Destructive-command guard | core |
 | `ask` | Structured questions | core |
-| `args` | $1/placeholders + shell substitution | core |
 | `clear` | /clear + side questions | core |
 | `todo` | Todo overlay + reminder | core |
 | `cache-hit` | Cache predictions | core |

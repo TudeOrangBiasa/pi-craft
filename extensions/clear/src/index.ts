@@ -1,2 +1,2 @@
-export { registerBtw } from "./btw/index.ts";
-export { default as registerClear } from "./clear.ts";
+export { registerBtw } from "./btw/index.js";
+export { default as registerClear } from "./clear.js";

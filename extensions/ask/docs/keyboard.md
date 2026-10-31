@@ -5,18 +5,18 @@ adapts to the size of your terminal.
 
 ## Keys
 
-| Key | What it does | Where it applies |
-| --- | --- | --- |
-| `↑` / `↓` | Move between rows. Wraps at both ends. | Option list, Submit picker |
-| `Enter` | Confirm the focused option, commit typed text, close notes, or activate the focused Submit-picker row. | Everywhere |
-| `Shift+Enter` | Insert a newline. | `Type something.` input, notes editor |
-| `Esc` | Cancel the whole questionnaire. | Everywhere except the notes editor, where it closes notes |
-| `Tab` / `Shift+Tab` | Next / previous tab, wrapping. `→` / `←` do the same. | Multi-question dialogs only |
-| `Space` | Toggle the focused checkbox. | Multi-select questions |
-| `n` | Open the notes editor for the focused question — or, on the Submit tab, the global note for the whole questionnaire. | Every question tab; the Submit tab in multi-question dialogs |
-| `Ctrl+G` | Open Pi's configured external editor with the current custom-answer draft. | `Type something.` input |
-| `Ctrl+U` | Clear the current custom-answer draft. | `Type something.` input |
-| `Ctrl+]` | Collapse or expand the dialog. Configurable via `collapseKey`. | Everywhere, including while collapsed |
+| Key                 | What it does                                                                                                         | Where it applies                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `↑` / `↓`           | Move between rows. Wraps at both ends.                                                                               | Option list, Submit picker                                   |
+| `Enter`             | Confirm the focused option, commit typed text, close notes, or activate the focused Submit-picker row.               | Everywhere                                                   |
+| `Shift+Enter`       | Insert a newline.                                                                                                    | `Type something.` input, notes editor                        |
+| `Esc`               | Cancel the whole questionnaire.                                                                                      | Everywhere except the notes editor, where it closes notes    |
+| `Tab` / `Shift+Tab` | Next / previous tab, wrapping. `→` / `←` do the same.                                                                | Multi-question dialogs only                                  |
+| `Space`             | Toggle the focused checkbox.                                                                                         | Multi-select questions                                       |
+| `n`                 | Open the notes editor for the focused question — or, on the Submit tab, the global note for the whole questionnaire. | Every question tab; the Submit tab in multi-question dialogs |
+| `Ctrl+G`            | Open Pi's configured external editor with the current custom-answer draft.                                           | `Type something.` input                                      |
+| `Ctrl+U`            | Clear the current custom-answer draft.                                                                               | `Type something.` input                                      |
+| `Ctrl+]`            | Collapse or expand the dialog. Configurable via `collapseKey`.                                                       | Everywhere, including while collapsed                        |
 
 The table names the default keys; the dialog actually follows your Pi keybindings.
 Confirm listens to both `tui.select.confirm` and `tui.input.submit`, and a key bound to
@@ -36,10 +36,10 @@ answer).
 
 ## The rows the dialog adds
 
-| Row | Label | Appended to |
-| --- | --- | --- |
+| Row           | Label             | Appended to                                                               |
+| ------------- | ----------------- | ------------------------------------------------------------------------- |
 | Custom answer | `Type something.` | Every question — single-select and multi-select, with or without previews |
-| Commit | `Next` | Multi-select questions only |
+| Commit        | `Next`            | Multi-select questions only                                               |
 
 Focusing `Type something.` switches the row into an inline multiline editor. In preview
 mode it expands to the full pane width while you type, so a long custom answer is not

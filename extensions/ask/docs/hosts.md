@@ -5,11 +5,11 @@ render at all.
 
 ## Three environments
 
-| Environment | What the model sees | What you see |
-| --- | --- | --- |
-| Interactive terminal | `ask_user_question` in its tool list | The full tabbed TUI overlay |
+| Environment                                  | What the model sees                  | What you see                                                 |
+| -------------------------------------------- | ------------------------------------ | ------------------------------------------------------------ |
+| Interactive terminal                         | `ask_user_question` in its tool list | The full tabbed TUI overlay                                  |
 | RPC / ACP host (VS Code pendant, Zed, Paseo) | `ask_user_question` in its tool list | A sequence of the host's own native select and input dialogs |
-| Non-interactive run (no UI) | Nothing — the tool is removed | Nothing |
+| Non-interactive run (no UI)                  | Nothing — the tool is removed        | Nothing                                                      |
 
 ### Terminal attention
 
@@ -60,16 +60,16 @@ that it should ask them as plain chat text instead — explicitly not a decline.
 
 Some parts of the dialog exist only under the right conditions:
 
-| Surface | Appears when |
-| --- | --- |
-| Tab bar and Submit tab | The call carries more than one question |
-| `Next` row | The question is multi-select |
-| `Type something.` row | Always |
-| Side-by-side preview | An option carries a `preview`, and terminal and pane are both ≥ 100 columns |
-| Preview pane at all | Single-select questions only |
-| Collapse shortcut | `collapseKey` is not `"off"` |
+| Surface                       | Appears when                                                                                                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tab bar and Submit tab        | The call carries more than one question                                                                                                                                |
+| `Next` row                    | The question is multi-select                                                                                                                                           |
+| `Type something.` row         | Always                                                                                                                                                                 |
+| Side-by-side preview          | An option carries a `preview`, and terminal and pane are both ≥ 100 columns                                                                                            |
+| Preview pane at all           | Single-select questions only                                                                                                                                           |
+| Collapse shortcut             | `collapseKey` is not `"off"`                                                                                                                                           |
 | Full overlay hide on collapse | The host also exposes raw terminal input (the only path that can reopen a hidden overlay); without it, collapsing shrinks the dialog to a visible one-line row instead |
-| Localized chrome | localization SDK is installed |
+| Localized chrome              | localization SDK is installed                                                                                                                                          |
 
 ## Loading and startup cost
 
@@ -80,7 +80,7 @@ timer is unref'd, so it never holds a process open, and a failed pre-warm is swa
 the first real call re-imports and reports properly.
 
 The pre-warm exists for a specific failure. Pi's module loader registers a module in its
-graph cache *before* evaluating it and does not evict it if evaluation throws. If your
+graph cache _before_ evaluating it and does not evict it if evaluation throws. If your
 package manager replaces the dependency store while Pi is running, one failed import can
 poison the cache for the rest of the process. Evaluating the graph early, while the paths
 Pi resolved at boot still exist, keeps it in memory for the process lifetime and makes
@@ -88,10 +88,10 @@ that unreachable.
 
 When it does happen, you get a structured envelope rather than a raw `TypeError`:
 
-| `error` | Meaning | Fix |
-| --- | --- | --- |
-| `session_load_failed` | The dialog module could not be imported. | Repair the install if needed, then restart Pi. |
-| `stale_module_cache` | The module cache went stale after an earlier failed import. | Restart Pi — this is unrecoverable in the running process. |
+| `error`               | Meaning                                                     | Fix                                                        |
+| --------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `session_load_failed` | The dialog module could not be imported.                    | Repair the install if needed, then restart Pi.             |
+| `stale_module_cache`  | The module cache went stale after an earlier failed import. | Restart Pi — this is unrecoverable in the running process. |
 
 Both messages tell the model the questions were never shown and to ask them as plain chat
 text instead of treating the failure as a decline.

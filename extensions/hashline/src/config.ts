@@ -1,7 +1,6 @@
-import { readFile } from "fs/promises";
 import { configPath } from "./paths";
-import { errCode, isRec } from "./utils";
-import { writeAtomic } from "./fs-write";
+import { isRec } from "./utils";
+import { readSection, writeSection } from "./pi-craft-settings";
 
 export interface Config {
   autoRead: boolean;
@@ -13,8 +12,7 @@ const DEFAULT_CONFIG: Config = {
   anchorGrepEnabled: false
 };
 
-function parseConfig(content: string): Config {
-  const parsed = JSON.parse(content) as unknown;
+function parseObject(parsed: unknown): Config {
   const autoRead = isRec(parsed) ? parsed.autoRead : undefined;
   if (typeof autoRead !== "boolean") {
     throw new Error("config.json must be an object with a boolean autoRead field");
@@ -28,18 +26,18 @@ function parseConfig(content: string): Config {
 
 
 export async function readConfig(): Promise<Config> {
+  const section = readSection("hashline", configPath());
+  if (Object.keys(section).length === 0) return { ...DEFAULT_CONFIG };
   try {
-    const content = await readFile(configPath(), "utf-8");
-    return parseConfig(content);
+    return parseObject(section);
   } catch (error: unknown) {
-    if (errCode(error) !== "ENOENT") {
-      console.error("Config file corrupted, using defaults:", error);
-    }
+    console.error("Config section corrupted, using defaults:", error);
     return { ...DEFAULT_CONFIG };
   }
 }
+
 export async function writeConfig(config: Config): Promise<void> {
-  await writeAtomic(configPath(), JSON.stringify(config, null, 2));
+  writeSection("hashline", { ...config });
 }
 
 

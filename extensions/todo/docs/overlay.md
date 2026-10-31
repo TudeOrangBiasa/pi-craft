@@ -1,20 +1,18 @@
 # Overlay and `/todos` display
 
-How
-`todo`
-renders the task list — when the overlay appears, what each glyph means, how
-overflow is trimmed, and which strings localize.
+How `todo` renders the task list: when the overlay appears, what each glyph
+means, how overflow is trimmed, and which strings localize.
 
 ## When the overlay exists
 
 The widget is mounted above the Pi editor under the key `pi-todos`.
 
-| Stage | Condition |
-| --- | --- |
-| Created | At the first session start that has a UI. A headless session never creates it. |
-| Registered | Only while at least one overlay-visible task exists. The widget unregisters itself when the list empties, and re-registers when a task reappears. |
-| Bound | Only the foreground session's overlay is refreshed. A detached or child session has its own task state and never rebinds or repaints the foreground panel. |
-| Disposed | On the foreground session's shutdown. A child session shutting down leaves the overlay alone. |
+| Stage      | Condition                                                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Created    | At the first session start that has a UI. A headless session never creates it.                                                                             |
+| Registered | Only while at least one overlay-visible task exists. The widget unregisters itself when the list empties, and re-registers when a task reappears.          |
+| Bound      | Only the foreground session's overlay is refreshed. A detached or child session has its own task state and never rebinds or repaints the foreground panel. |
+| Disposed   | On the foreground session's shutdown. A child session shutting down leaves the overlay alone.                                                              |
 
 Task state is partitioned by session id, so parallel sessions cannot read or
 overwrite each other's lists. Nothing is written to disk: on session start,
@@ -33,18 +31,18 @@ and taking the last `todo` tool result's snapshot, which replaces the whole list
 └─ ○ Add integration tests
 ```
 
-- **Heading** — `● Todos (done/total)` in the accent color while any task is
+- **Heading.** `● Todos (done/total)` in the accent color while any task is
   `pending` or `in_progress`; `○ Todos (done/total)` dimmed once everything is
   completed.
-- **Glyphs** — `○` pending, `◐` in_progress, `✓` completed, `✗` deleted.
+- **Glyphs.** `○` pending, `◐` in_progress, `✓` completed, `✗` deleted.
   Completed and deleted subjects render dim and struck through.
-- **activeForm** — appended dim in parentheses, only while the task is
+- **activeForm.** Appended dim in parentheses, only while the task is
   `in_progress`.
-- **Dependencies** — appended as `⛓ #1,#2` when the task has a `blockedBy` set.
-- **`#id` prefix** — shown on every row only when at least one visible task
+- **Dependencies.** Appended as `⛓ #1,#2` when the task has a `blockedBy` set.
+- **`#id` prefix.** Shown on every row only when at least one visible task
   carries a `blockedBy`. Without a `⛓ #N` anywhere, the per-row ids have nothing
   to point at, so they are omitted.
-- **Prefixes** — `├─` on each row, `└─` on the last one. A blank spacer line is
+- **Prefixes.** `├─` on each row, `└─` on the last one. A blank spacer line is
   always appended below the panel so it is not flush against the input box.
 
 Rows longer than the terminal width are truncated with `…`.
@@ -55,7 +53,7 @@ The content-row budget is `maxWidgetLines` (default `12`), and the heading count
 against it. When there are more tasks than fit:
 
 1. one row is reserved for the summary line;
-2. completed tasks are dropped first, newest first — the oldest completed rows
+2. completed tasks are dropped first, newest first, so the oldest completed rows
    are the last completed rows to go;
 3. if the unfinished tasks alone still overflow, the tail of that list is
    truncated;
@@ -76,8 +74,8 @@ session resets that tracking, so a fresh session shows the full list again.
 
 ## Collapsing
 
-Press `ctrl+shift+t` to collapse the panel to two lines — the heading plus a dim
-`└─ ctrl+shift+t to expand` hint — and again to expand it. The hint always shows
+Press `ctrl+shift+t` to collapse the panel to two lines (the heading plus a dim
+`└─ ctrl+shift+t to expand` hint), and again to expand it. The hint always shows
 the currently configured key.
 
 Rebind or disable the shortcut with the `collapseKey` option; see
@@ -114,6 +112,6 @@ tasks. Tombstoned tasks are never listed.
 
 This fork is English-only: the overlay heading, the `+N more` summary, the
 collapse hint, the `/todos` section headers, and the status words all render
-their inline English literals. LLM-facing output — the tool response envelope,
-reducer error messages, and the schema descriptions — is also English by design.
+their inline English literals. LLM-facing output (the tool response envelope,
+reducer error messages, and the schema descriptions) is also English by design.
 No external i18n SDK is loaded.

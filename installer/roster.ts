@@ -16,7 +16,6 @@ export const ROSTER: readonly PackageEntry[] = [
   { name: "vision", tier: "core" },
   { name: "safety-net", tier: "core" },
   { name: "ask", tier: "core" },
-  { name: "args", tier: "core" },
   { name: "clear", tier: "core" },
   { name: "todo", tier: "core" },
   { name: "cache-hit", tier: "core" },

@@ -1,10 +1,12 @@
 // Persistence for pi-subagents operational settings.
-// - Global:  ~/.pi/agent/subagents.json (via getAgentDir()) — manual defaults, never written here
+// - Global:  the pi-craft.json `subagents` section — manual defaults, never written here
+// - Legacy:  ~/.pi/agent/subagents.json (via getAgentDir()) — read once, then migrated
 // - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global on load
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { readSection } from "./pi-craft-settings.js";
 import { NO_FALLBACK } from "./agent-types.js";
 import type { JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
 
@@ -449,10 +451,6 @@ function sanitize(raw: unknown): SubagentsSettings {
   return out;
 }
 
-function globalPath(): string {
-  return join(getAgentDir(), "subagents.json");
-}
-
 function projectPath(cwd: string): string {
   return join(cwd, ".pi", "subagents.json");
 }
@@ -475,7 +473,8 @@ function readSettingsFile(path: string): SubagentsSettings {
 
 /** Load merged settings: global provides defaults, project overrides. */
 export function loadSettings(cwd: string = process.cwd()): SubagentsSettings {
-  return { ...readSettingsFile(globalPath()), ...readSettingsFile(projectPath(cwd)) };
+  const global = sanitize(readSection("subagents", join(getAgentDir(), "subagents.json")));
+  return { ...global, ...readSettingsFile(projectPath(cwd)) };
 }
 
 /**

@@ -2,7 +2,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "@sinclair/typebox";
 
 // ---------------------------------------------------------------------------
-// Tool / command identity — verbatim string boundaries.
+// Tool / command identity: verbatim string boundaries.
 // Tool name "todo" is the persistence key for branch replay (filtering
 // `toolResult.toolName === "todo"`) AND the permissions entry at
 // `templates/pi-permissions.jsonc:26`. DO NOT rename.
@@ -28,14 +28,14 @@ export type TaskStatus = "pending" | "in_progress" | "completed" | "deleted";
 export type TaskAction = "create" | "update" | "list" | "get" | "delete" | "clear";
 
 export interface Task {
-	id: number;
-	subject: string;
-	description?: string;
-	activeForm?: string;
-	status: TaskStatus;
-	blockedBy?: number[];
-	owner?: string;
-	metadata?: Record<string, unknown>;
+  id: number;
+  subject: string;
+  description?: string;
+  activeForm?: string;
+  status: TaskStatus;
+  blockedBy?: number[];
+  owner?: string;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -45,11 +45,11 @@ export interface Task {
  * cross-version replay compatibility.
  */
 export interface TaskDetails {
-	action: TaskAction;
-	params: Record<string, unknown>;
-	tasks: Task[];
-	nextId: number;
-	error?: string;
+  action: TaskAction;
+  params: Record<string, unknown>;
+  tasks: Task[];
+  nextId: number;
+  error?: string;
 }
 
 /**
@@ -58,71 +58,71 @@ export interface TaskDetails {
  * `Static<typeof TodoParamsSchema>` without `as` casts.
  */
 export interface TaskMutationParams {
-	[key: string]: unknown;
-	subject?: string;
-	description?: string;
-	activeForm?: string;
-	status?: TaskStatus;
-	blockedBy?: number[];
-	addBlockedBy?: number[];
-	removeBlockedBy?: number[];
-	owner?: string;
-	metadata?: Record<string, unknown>;
-	id?: number;
-	includeDeleted?: boolean;
+  [key: string]: unknown;
+  subject?: string;
+  description?: string;
+  activeForm?: string;
+  status?: TaskStatus;
+  blockedBy?: number[];
+  addBlockedBy?: number[];
+  removeBlockedBy?: number[];
+  owner?: string;
+  metadata?: Record<string, unknown>;
+  id?: number;
+  includeDeleted?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// TypeBox parameter schema — every `description` doubles as LLM-facing prompt
+// TypeBox parameter schema: every `description` doubles as LLM-facing prompt
 // copy. Field order and wording are pinned by registration tests and the
 // pre-refactor schema at `packages/pi-todo/todo.ts:512-573`.
 // ---------------------------------------------------------------------------
 
 export const TodoParamsSchema = Type.Object({
-	action: StringEnum(["create", "update", "list", "get", "delete", "clear"] as const),
-	subject: Type.Optional(Type.String({ description: "Task subject (required for create)" })),
-	description: Type.Optional(Type.String({ description: "Long-form details" })),
-	activeForm: Type.Optional(
-		Type.String({
-			description: "Spinner label while in_progress",
-		}),
-	),
-	status: Type.Optional(
-		StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
-			description: "Set status (update) or filter (list)",
-		}),
-	),
-	blockedBy: Type.Optional(
-		Type.Array(Type.Number(), {
-			description: "Initial deps (create only)",
-		}),
-	),
-	addBlockedBy: Type.Optional(
-		Type.Array(Type.Number(), {
-			description: "Add deps (update only)",
-		}),
-	),
-	removeBlockedBy: Type.Optional(
-		Type.Array(Type.Number(), {
-			description: "Remove deps (update only)",
-		}),
-	),
-	owner: Type.Optional(Type.String({ description: "Assignee" })),
-	metadata: Type.Optional(
-		Type.Record(Type.String(), Type.Unknown(), {
-			description: "Freeform metadata (null value deletes key)",
-		}),
-	),
-	id: Type.Optional(
-		Type.Number({
-			description: "Task id (update/get/delete)",
-		}),
-	),
-	includeDeleted: Type.Optional(
-		Type.Boolean({
-			description: "Include tombstones in list",
-		}),
-	),
+  action: StringEnum(["create", "update", "list", "get", "delete", "clear"] as const),
+  subject: Type.Optional(Type.String({ description: "Task subject (required for create)" })),
+  description: Type.Optional(Type.String({ description: "Long-form details" })),
+  activeForm: Type.Optional(
+    Type.String({
+      description: "Spinner label while in_progress",
+    }),
+  ),
+  status: Type.Optional(
+    StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
+      description: "Set status (update) or filter (list)",
+    }),
+  ),
+  blockedBy: Type.Optional(
+    Type.Array(Type.Number(), {
+      description: "Initial deps (create only)",
+    }),
+  ),
+  addBlockedBy: Type.Optional(
+    Type.Array(Type.Number(), {
+      description: "Add deps (update only)",
+    }),
+  ),
+  removeBlockedBy: Type.Optional(
+    Type.Array(Type.Number(), {
+      description: "Remove deps (update only)",
+    }),
+  ),
+  owner: Type.Optional(Type.String({ description: "Assignee" })),
+  metadata: Type.Optional(
+    Type.Record(Type.String(), Type.Unknown(), {
+      description: "Freeform metadata (null value deletes key)",
+    }),
+  ),
+  id: Type.Optional(
+    Type.Number({
+      description: "Task id (update/get/delete)",
+    }),
+  ),
+  includeDeleted: Type.Optional(
+    Type.Boolean({
+      description: "Include tombstones in list",
+    }),
+  ),
 });
 
 export type TodoParams = Static<typeof TodoParamsSchema>;

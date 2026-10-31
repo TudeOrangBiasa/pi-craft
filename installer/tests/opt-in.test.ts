@@ -20,7 +20,6 @@ const CORE = [
   "vision",
   "safety-net",
   "ask",
-  "args",
   "clear",
   "todo",
   "cache-hit",

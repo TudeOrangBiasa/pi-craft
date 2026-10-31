@@ -6,14 +6,14 @@ for the `todo` tool registered by
 
 ## Actions
 
-| Action | Required params | What it does |
-| --- | --- | --- |
-| `create` | `subject` | Adds a task in `pending`, assigns the next id. |
-| `update` | `id` + at least one mutable field | Changes status, fields, or dependencies. |
-| `list` | — | Returns all tasks, optionally filtered by `status`. |
-| `get` | `id` | Returns one task with its `blockedBy` and reverse `blocks` edges. |
-| `delete` | `id` | Tombstones the task (`status: "deleted"`); it is not removed. |
-| `clear` | — | Drops every task and resets the id counter to `1`. |
+| Action   | Required params                   | What it does                                                      |
+| -------- | --------------------------------- | ----------------------------------------------------------------- |
+| `create` | `subject`                         | Adds a task in `pending`, assigns the next id.                    |
+| `update` | `id` + at least one mutable field | Changes status, fields, or dependencies.                          |
+| `list`   | none                              | Returns all tasks, optionally filtered by `status`.               |
+| `get`    | `id`                              | Returns one task with its `blockedBy` and reverse `blocks` edges. |
+| `delete` | `id`                              | Tombstones the task (`status: "deleted"`); it is not removed.     |
+| `clear`  | none                              | Drops every task and resets the id counter to `1`.                |
 
 ## Parameters
 
@@ -42,23 +42,23 @@ todo({
   status?: "pending" | "in_progress" | "completed" | "deleted",
 
   // list-only
-  includeDeleted?: boolean,           // default false — hides tombstones
+  includeDeleted?: boolean,           // default false, hides tombstones
 })
 ```
 
 `update` merges `metadata` key by key into the existing record; passing `null`
 for a key removes it, and emptying the record drops the field entirely.
-`addBlockedBy` and `removeBlockedBy` are additive — do not resend the whole
+`addBlockedBy` and `removeBlockedBy` are additive, so do not resend the whole
 array.
 
 ## Status transitions
 
-| From | Allowed targets |
-| --- | --- |
-| `pending` | `in_progress`, `completed`, `deleted` |
-| `in_progress` | `pending`, `completed`, `deleted` |
-| `completed` | `deleted` |
-| `deleted` | _(terminal)_ |
+| From          | Allowed targets                       |
+| ------------- | ------------------------------------- |
+| `pending`     | `in_progress`, `completed`, `deleted` |
+| `in_progress` | `pending`, `completed`, `deleted`     |
+| `completed`   | `deleted`                             |
+| `deleted`     | _(terminal)_                          |
 
 A transition to the current status is always accepted and reported as a no-op.
 `delete` keeps the task as a tombstone so historic `blockedBy` references still
@@ -72,17 +72,32 @@ is mutated, so a rejected call leaves the list untouched:
 - a dependency id that does not exist is rejected;
 - a dependency that is already tombstoned is rejected;
 - blocking a task on itself is rejected;
+- naming the same dependency twice in one call is rejected;
 - an `addBlockedBy` that would close a cycle in the graph is rejected.
 
 `get` also reports the reverse edges as a `blocks:` line, derived from the other
 tasks' `blockedBy` arrays.
+
+## Complexity
+
+Each public state function documents its cost in its comment. Summary with n
+tasks and E total `blockedBy` edges:
+
+| Path                     | Cost                                                            |
+| ------------------------ | --------------------------------------------------------------- |
+| `create`                 | O(n + d) for d requested deps: one index build, O(1) per dep    |
+| `update`                 | O(n + E) worst case: one scan, one index build, one cycle check |
+| `list`, `clear`          | O(1) in the reducer; the envelope renders `list` in O(n + E)    |
+| `get`, `delete`          | O(n) single scan                                                |
+| Overlay render, `/todos` | O(n) total: one `scanVisibleTasks` pass feeds every part        |
+| `replayFromBranch`       | O(b + n + E) for b branch entries; only the winner is copied    |
 
 ## Return envelope
 
 ```ts
 {
   content: [{ type: "text", text: string }], // human-readable summary of the op
-  details: {                                 // full snapshot — replay reads this back
+  details: {                                 // full snapshot, replay reads this back
     action: TaskAction,
     params: Record<string, unknown>,
     tasks: Array<{
@@ -103,44 +118,44 @@ tasks' `blockedBy` arrays.
 
 `details` is the persistence format. Every successful call embeds the complete
 post-mutation snapshot, and the session-lifecycle handlers rebuild state by
-walking the branch and taking the last snapshot they find — which is why tasks
+walking the branch and taking the last snapshot they find, which is why tasks
 survive `/reload` and compaction without any disk writes.
 
 ## Content strings
 
-| Situation | `content[0].text` |
-| --- | --- |
-| Created | `Created #3: Write the parser (pending)` |
-| Updated with a status change | `Updated #3 (pending → in_progress)` |
-| Updated without a status change | `Updated #3` |
-| Update that changed nothing | `No change: #3 already matches the requested values (status: in_progress)` |
-| Deleted | `Deleted #3: Write the parser` |
-| Cleared | `Cleared 7 tasks` |
-| `list` row | `[in_progress] #3 Write the parser (writing the parser) ⛓ #1,#2` |
-| `list` with nothing to show | `No tasks` |
-| Any rejection | `Error: <message>` |
+| Situation                       | `content[0].text`                                                          |
+| ------------------------------- | -------------------------------------------------------------------------- |
+| Created                         | `Created #3: Write the parser (pending)`                                   |
+| Updated with a status change    | `Updated #3 (pending → in_progress)`                                       |
+| Updated without a status change | `Updated #3`                                                               |
+| Update that changed nothing     | `No change: #3 already matches the requested values (status: in_progress)` |
+| Deleted                         | `Deleted #3: Write the parser`                                             |
+| Cleared                         | `Cleared 7 tasks`                                                          |
+| `list` row                      | `[in_progress] #3 Write the parser (writing the parser) ⛓ #1,#2`           |
+| `list` with nothing to show     | `No tasks`                                                                 |
+| Any rejection                   | `Error: <message>`                                                         |
 
 The `No change` reply exists so a model that re-issues an identical update sees
 that it was a no-op instead of a fresh `Updated #N`.
 
-## Error messages
-
-| Message | Cause |
-| --- | --- |
-| `subject required for create` | `create` without a non-blank `subject`. |
-| `blockedBy: #N not found` | `create` naming an unknown dependency. |
-| `blockedBy: #N is deleted` | `create` naming a tombstoned dependency. |
-| `id required for update` / `get` / `delete` | `id` omitted. |
-| `#N not found` | No task with that id. |
-| `update requires at least one mutable field: subject, description, activeForm, status, owner, metadata, addBlockedBy, or removeBlockedBy` | `update` with only an `id`. |
-| `illegal transition completed → in_progress` | Target status not reachable from the current one. |
-| `cannot block #N on itself` | `addBlockedBy` includes the task's own id. |
-| `addBlockedBy: #N not found` / `is deleted` | Unknown or tombstoned dependency. |
-| `addBlockedBy would create a cycle in the blockedBy graph` | The edge would close a cycle. |
-| `#N is already deleted` | `delete` on a tombstone. |
-
-Errors are returned in-band: `content` carries `Error: …` and `details.error`
-carries the bare message. Task state is unchanged.
+| Message                                                                                                                                   | Cause                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `subject required for create`                                                                                                             | `create` without a non-blank `subject`.            |
+| `subject cannot be blank`                                                                                                                 | `update` setting `subject` to blank.               |
+| `blockedBy: #N not found`                                                                                                                 | `create` naming an unknown dependency.             |
+| `blockedBy: #N is deleted`                                                                                                                | `create` naming a tombstoned dependency.           |
+| `blockedBy: duplicate #N`                                                                                                                 | `create` naming the same dependency twice.         |
+| `cannot block #N on itself`                                                                                                               | `create` or `addBlockedBy` naming the task itself. |
+| `id required for update` / `get` / `delete`                                                                                               | `id` omitted.                                      |
+| `id must be an integer for update` / `get` / `delete`                                                                                     | `id` is not an integer.                            |
+| `#N not found`                                                                                                                            | No task with that id.                              |
+| `update requires at least one mutable field: subject, description, activeForm, status, owner, metadata, addBlockedBy, or removeBlockedBy` | `update` with only an `id`.                        |
+| `blockedBy is create-only; use addBlockedBy/removeBlockedBy to change dependencies`                                                       | `update` resending the full array.                 |
+| `illegal transition completed → in_progress`                                                                                              | Target status not reachable from the current one.  |
+| `addBlockedBy: #N not found` / `is deleted`                                                                                               | Unknown or tombstoned dependency.                  |
+| `addBlockedBy: duplicate #N`                                                                                                              | Same dependency twice in one call.                 |
+| `addBlockedBy would create a cycle in the blockedBy graph`                                                                                | The edge would close a cycle.                      |
+| `#N is already deleted`                                                                                                                   | `delete` on a tombstone.                           |
 
 ## Prompt guidance
 
@@ -148,5 +163,4 @@ The tool ships a `promptSnippet` and eight `promptGuidelines` bullets telling th
 model when to open a list, to keep exactly one task `in_progress`, to mark work
 completed immediately rather than in batches, never to complete a task with
 failing tests, and the literal `update {id, status}` call shape for changing a
-task's status. Both are overridable — see
-[configuration.md](./configuration.md#guidance).
+task's status. Both are overridable, see

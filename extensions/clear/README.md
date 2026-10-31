@@ -4,8 +4,6 @@ Pi extension with slash commands:
 
 - `/clear`, flush cached model data.
 - `/btw [--ctx] <question>`, ask an isolated side question without interrupting the main agent.
-- `/afk`, toggle unattended mode (yellow gates auto-allow, red and root auto-deny).
-- `/yolo`, toggle full auto-approve mode for capable models with session consent.
 
 ## `/clear`
 
@@ -21,92 +19,22 @@ Deletes `~/.cache/pi` to flush stale model-data cache, then prompts you to run `
 ```
 
 Run `/btw` with no question to print usage. The live
-above-editor widget lingers finished asides for `collapse.delaySec × 3` (errors
-`× 9`), so a fire-and-leave aside stays visible while you are away; the durable
-answer card in the log never expires.
+above-editor widget lingers finished asides for 30s (errors 90s), so a
+fire-and-leave aside stays visible while you are away; the durable answer
+card in the log never expires.
 
 The child session:
 
-- starts with an empty conversation and a lean Pix system prompt;
+- starts with an empty conversation and a lean system prompt;
 - snapshots the main session's model, thinking level, active tools, credentials, extensions, and working directory;
-- never imports the main conversation **unless you pass `--ctx`**, which folds the last 10 main-session turns in as a one-shot, read-only preamble (visible in the question, still a fresh isolated session — nothing is written back to the main thread);
+- never imports the main conversation **unless you pass `--ctx`**, which folds the last 10 main-session turns in as a one-shot, read-only preamble (visible in the question, still a fresh isolated session, nothing is written back to the main thread);
 - publishes its Markdown answer in a visually distinct side-thread card;
 - keeps rendered BTW answers out of future main-agent LLM context;
 - supports multiple concurrent side questions.
 
-When the main agent is streaming, completion is shown as a notification and the durable card is appended after the main session becomes idle. This prevents the side answer from becoming steering input.
-
-## `/afk`
-
-`/afk` toggles AFK mode (away-from-keyboard) for unattended runs. It is a shared
-toggle stored in a global flag and shown in the status bar.
-
-When ON, yellow (medium-risk) permission gates auto-allow, while red (dangerous)
-gates and sudo prompts auto-deny:
-
-```text
-AFK mode on — yellow gates auto-allow; red and sudo auto-deny.
-```
-
-When OFF (the default), normal approval prompts are restored:
-
-```text
-AFK mode off — approval prompts restored.
-```
-
-The point is to let the agent keep working on safe, medium-risk actions while you
-are away. You still get pinged when something truly needs you (a red gate or
-root). Auto-deny turns that into a stop rather than an approval.
-
-## `/yolo`
-
-`/yolo` toggles YOLO mode: **almost** every permission gate auto-approves,
-**including red (critical) commands and root (`sudo_run`)**. For the vast
-majority of actions there is no human confirming, so a destructive or
-irreversible action can run before anyone stops it. Use it only when you accept
-that. A few things still stop you — the four guardrails below are the deliberate
-exceptions to "auto-approve everything."
-
-```text
-YOLO mode on (model score 82) — every gate including red and root auto-approves.
-```
-
-Four guardrails temper the blast radius:
-
-- **One-time session consent.** The first `/yolo` of each session opens a
-  blocking modal spelling out the damage risk and the AS-IS/no-liability
-  disclaimer; you must explicitly accept before YOLO arms. Cancel leaves the
-  normal prompts in place. Consent is session-scoped — a fresh session asks
-  again, so arming YOLO is always a conscious act, never a forgotten flag.
-
-- **Capable models only.** YOLO refuses to turn on unless the active model has a
-  benchmark score of at least `75`. A weaker or off-catalog model is rejected.
-- **Root still needs a ticket.** `sudo_run` auto-approves only when a valid PAM
-  ticket is already cached — the password cannot be auto-typed, so a first root
-  command with no cached ticket still shows the password prompt. Bare `sudo` in
-  `bash` is always redirected to `sudo_run`, never run directly.
-- **Circuit breaker.** A short list of catastrophic, unrecoverable commands
-  is exempt from every mode. A genuine `dd`-to-USB or `mkfs` still runs, it just
-  falls back to a one-time Allow/Deny prompt instead of a silent auto-approve.
-
-`/afk` and `/yolo` are mutually exclusive; turning one on turns the other off.
-
-### Mode awareness (both modes)
-
-A relaxed gate is dangerous mainly because the _model_ keeps acting as if a human
-will still catch a bad call. To close that gap, while either mode is active a
-short banner is injected into every turn via `before_agent_start`, telling the
-model the safety net is off and what it now owns:
-
-- **AFK** — plan around auto-deny of red and root; do not depend on a denied step
-  succeeding; stop and summarize when a denial blocks progress.
-- **YOLO** — before any red or root action, state in the reply why it is
-  necessary, its blast radius and worst-case fallout, and whether it is
-  reversible; if it cannot be justified, do not run it; always prefer the least
-  destructive path.
-
-The banner is only present while a mode is on, so it costs no baseline tokens
-otherwise.
+The card lands the instant the side question finishes, even mid-stream. It is
+a display-only entry, so it never enters the main agent's LLM context and
+never steers the running turn.
 
 ## Install
 

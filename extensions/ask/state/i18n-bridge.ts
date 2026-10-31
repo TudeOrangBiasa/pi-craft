@@ -16,5 +16,5 @@ const scopeImpl: ScopeFn = (_key, fallback) => fallback;
 export const t: ScopeFn = scopeImpl;
 
 export function displayLabel(kind: SentinelKind): string {
-	return t(`sentinel.${kind}`, ROW_INTENT_META[kind].label);
+  return t(`sentinel.${kind}`, ROW_INTENT_META[kind].label);
 }

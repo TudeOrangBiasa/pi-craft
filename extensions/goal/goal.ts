@@ -5,6 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
+import { readUnifiedSection } from "./pi-craft-settings.js";
 
 // ---------------------------------------------------------------------------
 // Goal mode: Claude Code-style autonomous completion loop.
@@ -87,7 +88,12 @@ export interface TerminalParams {
   kind: "complete" | "blocked";
 }
 
-/** Verifier configuration: env-read at each call so tests can flip it per case. */
+/**
+ * Verifier configuration: env vars win when set, else the unified
+ * pi-craft.json `goal` section. Read at each call so tests can flip it
+ * per case. Section keys: `verify` (boolean, default true),
+ * `verifyModel` (string), `verifyTimeoutMs` (positive number).
+ */
 export interface VerifyConfig {
   enabled: boolean;
   model: string | undefined;
@@ -95,7 +101,8 @@ export interface VerifyConfig {
 }
 
 export function readVerifyConfig(env: NodeJS.ProcessEnv = process.env): VerifyConfig {
-  const timeoutRaw = env.PI_GOAL_VERIFY_TIMEOUT_MS;
+  const section = readUnifiedSection("goal");
+  const timeoutRaw = env.PI_GOAL_VERIFY_TIMEOUT_MS ?? sectionValue(section.verifyTimeoutMs);
   const timeoutMs =
     timeoutRaw !== undefined &&
     timeoutRaw.trim() !== "" &&
@@ -103,12 +110,22 @@ export function readVerifyConfig(env: NodeJS.ProcessEnv = process.env): VerifyCo
     Number(timeoutRaw) > 0
       ? Math.floor(Number(timeoutRaw))
       : undefined;
-  const model = env.PI_GOAL_VERIFY_MODEL?.trim();
+  const modelRaw = env.PI_GOAL_VERIFY_MODEL ?? sectionValue(section.verifyModel);
+  const model = modelRaw === undefined ? undefined : modelRaw.trim();
+  const enabled =
+    env.PI_GOAL_VERIFY !== undefined ? env.PI_GOAL_VERIFY !== "0" : section.verify !== false;
   return {
-    enabled: env.PI_GOAL_VERIFY !== "0",
+    enabled,
     model: model === undefined || model === "" ? undefined : model,
     timeoutMs,
   };
+}
+
+/** String form of a section value (numbers stringify, else undefined). */
+function sectionValue(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
 }
 
 export type CompleteOutcome =

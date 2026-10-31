@@ -28,13 +28,13 @@ ask_user_question({
 
 ### Limits
 
-| Field | Constraint | Enforced by |
-| --- | --- | --- |
-| `questions` | 1-4 entries | TypeBox schema + `validateQuestionnaire` |
-| `questions[].header` | max 16 characters | TypeBox schema only |
-| `questions[].options` | 2-4 entries | TypeBox schema (both bounds) + `validateQuestionnaire` (minimum only) |
-| `options[].label` | max 60 characters | TypeBox schema only |
-| `options[].preview` | single-select questions only | tool description (multi-select tabs render checkbox rows) |
+| Field                 | Constraint                   | Enforced by                                                           |
+| --------------------- | ---------------------------- | --------------------------------------------------------------------- |
+| `questions`           | 1-4 entries                  | TypeBox schema + `validateQuestionnaire`                              |
+| `questions[].header`  | max 16 characters            | TypeBox schema only                                                   |
+| `questions[].options` | 2-4 entries                  | TypeBox schema (both bounds) + `validateQuestionnaire` (minimum only) |
+| `options[].label`     | max 60 characters            | TypeBox schema only                                                   |
+| `options[].preview`   | single-select questions only | tool description (multi-select tabs render checkbox rows)             |
 
 The two `maxLength` limits are checked by the parameter schema before `execute` runs;
 the runtime validator does not re-check them.
@@ -52,18 +52,18 @@ that row is never appended there.
 Every rejection returns `cancelled: true`, an empty `answers` array, and an `error`
 code. The `content[0].text` string is written for the model, not for a log.
 
-| `error` | Cause |
-| --- | --- |
-| `no_questions` | `questions` was empty |
-| `too_many_questions` | more than 4 questions in one call |
-| `duplicate_question` | two questions with identical text |
-| `empty_options` | a question carried fewer than 2 options |
-| `reserved_label` | an option used a reserved label |
-| `duplicate_option_label` | two options in one question share a label |
-| `no_ui` | the run has no UI (`ctx.hasUI === false`) |
-| `no_custom_ui` | the host cannot render custom UI and exposes no `select`/`input` dialogs |
-| `session_load_failed` | the dialog module failed to import (dependencies changed on disk mid-session) |
-| `stale_module_cache` | the loader cached a broken module after an earlier failed import; needs a Pi restart |
+| `error`                  | Cause                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `no_questions`           | `questions` was empty                                                                |
+| `too_many_questions`     | more than 4 questions in one call                                                    |
+| `duplicate_question`     | two questions with identical text                                                    |
+| `empty_options`          | a question carried fewer than 2 options                                              |
+| `reserved_label`         | an option used a reserved label                                                      |
+| `duplicate_option_label` | two options in one question share a label                                            |
+| `no_ui`                  | the run has no UI (`ctx.hasUI === false`)                                            |
+| `no_custom_ui`           | the host cannot render custom UI and exposes no `select`/`input` dialogs             |
+| `session_load_failed`    | the dialog module failed to import (dependencies changed on disk mid-session)        |
+| `stale_module_cache`     | the loader cached a broken module after an earlier failed import; needs a Pi restart |
 
 `reserved_label` short-circuits before `duplicate_option_label`.
 
@@ -110,7 +110,10 @@ The package publishes one event on Pi's event bus, emitted after validation pass
 before the dialog is shown. Import it from the `/events` subpath:
 
 ```ts
-import { ASK_USER_PROMPT_EVENT, type AskUserPromptEventPayload } from "@juicesharp/rpiv-ask-user-question/events";
+import {
+  ASK_USER_PROMPT_EVENT,
+  type AskUserPromptEventPayload,
+} from "@juicesharp/rpiv-ask-user-question/events";
 
 pi.events.on(ASK_USER_PROMPT_EVENT, (payload: AskUserPromptEventPayload) => {
   // payload.questions[].{ question, header, multiSelect, options[] }
@@ -118,7 +121,7 @@ pi.events.on(ASK_USER_PROMPT_EVENT, (payload: AskUserPromptEventPayload) => {
 });
 ```
 
-The channel name is `pi-ask-user-question:prompt`. Preview *content* is deliberately not shipped
+The channel name is `pi-ask-user-question:prompt`. Preview _content_ is deliberately not shipped
 in the payload — only `hasPreview: boolean` — so listeners forwarding the event across a
 process or network boundary stay cheap.
 

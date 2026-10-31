@@ -23,8 +23,7 @@ This is an estimate, not provider preflight data. Provider expiry or eviction, c
 ## Local development
 
 ```bash
-bun install
-bun run check
-bun run pack:dry
-pi -e ./index.ts
+bun test extensions/cache-hit
 ```
+
+Lane identity is strict: blank provider, api, or model stays silent instead of predicting. Blank reasoning levels fall back to `unknown`. Invalid token counts read as missing, never NaN.
