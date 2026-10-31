@@ -1,7 +1,7 @@
 {
   "name": "goal",
   "version": "0.1.0",
-  "description": "Craft-harness extension. Claude Code-style autonomous goal loop: /goal, idle-gated continuation, goal_complete/goal_blocked.",
+  "description": "Owned pi-craft extension. Autonomous goal loop: /goal, idle-gated continuation, goal_complete/goal_blocked, read-only verifier gate.",
   "license": "MIT",
   "type": "module",
   "exports": {

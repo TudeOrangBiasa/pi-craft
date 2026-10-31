@@ -1,7 +1,7 @@
 {
   "name": "subagents",
   "version": "0.19.0",
-  "description": "A pi extension that brings Claude Code-like sub-agents and workflow orchestration to pi — parallel execution, live widget, fleet view, custom agent types, mid-run steering, dynamic workflows, Claude Code compatibility, look and feel.",
+  "description": "Pi extension for parallel subagents. Spawn background agents, watch them in FleetView, steer them mid-run, resume finished runs. Durable across reloads with per-agent timeouts.",
   "license": "MIT",
   "publishConfig": {
     "access": "public"

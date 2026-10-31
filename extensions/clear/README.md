@@ -1,11 +1,11 @@
-# pix-commands
+# clear
 
-Pi extension providing focused slash commands:
+Pi extension with slash commands:
 
-- `/clear` — flush Pi's cached model data.
-- `/btw [--ctx] <question>` — ask an isolated side question without interrupting the main agent (`--ctx` folds in recent main-session turns).
-- `/afk` — toggle AFK mode for unattended runs (yellow auto-allow, red/root auto-deny).
-- `/yolo` — toggle YOLO mode for unattended runs (auto-approve nearly everything incl. red/root; capable models only, session consent required).
+- `/clear`, flush cached model data.
+- `/btw [--ctx] <question>`, ask an isolated side question without interrupting the main agent.
+- `/afk`, toggle unattended mode (yellow gates auto-allow, red and root auto-deny).
+- `/yolo`, toggle full auto-approve mode for capable models with session consent.
 
 ## `/clear`
 
@@ -55,10 +55,8 @@ AFK mode off — approval prompts restored.
 ```
 
 The point is to let the agent keep working on safe, medium-risk actions while you
-are away, without silently permitting destructive ones. It pairs with the herdr
-notification bridge in `pix-runtime`: you still get pinged when something truly
-needs you (a red gate or root), and auto-deny turns that into a stop rather than
-an approval.
+are away. You still get pinged when something truly needs you (a red gate or
+root). Auto-deny turns that into a stop rather than an approval.
 
 ## `/yolo`
 
@@ -82,26 +80,20 @@ Four guardrails temper the blast radius:
   again, so arming YOLO is always a conscious act, never a forgotten flag.
 
 - **Capable models only.** YOLO refuses to turn on unless the active model has a
-  benchmark score of at least `75` (from `pix-data`). A weaker or off-catalog
-  model is rejected with a message, because auto-approving red and root demands a
-  model that reasons well about consequences.
+  benchmark score of at least `75`. A weaker or off-catalog model is rejected.
 - **Root still needs a ticket.** `sudo_run` auto-approves only when a valid PAM
   ticket is already cached — the password cannot be auto-typed, so a first root
   command with no cached ticket still shows the password prompt. Bare `sudo` in
   `bash` is always redirected to `sudo_run`, never run directly.
-- **Circuit breaker.** A short list of catastrophic, unrecoverable commands —
-  `rm -rf /` or `~`, `dd`/redirect onto a raw disk, `mkfs` on a device, a fork
-  bomb — is exempt from *every* mode, including YOLO (see `pix-gate`). This does **not**
-  forbid the command: a genuine `dd`-to-USB or `mkfs` still runs, it just falls
-  back to a one-time Allow/Deny prompt instead of a silent auto-approve. One
-  extra click, only under YOLO, only on the handful of commands you can't undo.
-  Mirrors Claude Code's `bypassPermissions` floor.
+- **Circuit breaker.** A short list of catastrophic, unrecoverable commands
+  is exempt from every mode. A genuine `dd`-to-USB or `mkfs` still runs, it just
+  falls back to a one-time Allow/Deny prompt instead of a silent auto-approve.
 
 `/afk` and `/yolo` are mutually exclusive; turning one on turns the other off.
 
 ### Mode awareness (both modes)
 
-A relaxed gate is dangerous mainly because the *model* keeps acting as if a human
+A relaxed gate is dangerous mainly because the _model_ keeps acting as if a human
 will still catch a bad call. To close that gap, while either mode is active a
 short banner is injected into every turn via `before_agent_start`, telling the
 model the safety net is off and what it now owns:
