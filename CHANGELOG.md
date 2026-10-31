@@ -19,6 +19,7 @@ Newest entries are first. Each release lists changes and upgrade steps.
 - Goal mode (`/goal`, see `docs/adr/0010-goal-mode.md`). Each session has a maximum of one goal. Pi continues only when the agent is fully idle. The budget ends with one wrap-up turn. Then the loop stops. State is kept across `/reload` and `/resume`.
 - A read-only verifier for `goal_complete` (see `docs/adr/0011-goal-verifier-gate.md`). The goal needs a `PASS` from a new read-only subagent. `FAIL` returns what is missing. `IMPOSSIBLE` blocks the goal. Two `FAIL` results in a row with no new evidence also block the goal. Set `PI_GOAL_VERIFY=0` to turn off verification. Without verification, the worker claim ends the goal.
 - GitHub issues as the issue tracker. Docs point to issues. They do not point to `.scratch/`. Triage labels now include `risk:low`, `risk:medium`, and `risk:high`. `.scratch/` stays gitignored. It stores run logs.
+- One settings file for all extensions: `~/.pi/agent/pi-craft.json`, one section per extension. Old config files still work and move over once. Pi has no API to add extension sections to the `/settings` TUI, so each extension keeps its own settings screen, but all screens read and write the same file.
 
 ### Upgrade
 

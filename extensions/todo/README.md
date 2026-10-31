@@ -4,7 +4,7 @@ Pi extension. One `todo` tool, one `/todos` command, one live panel above the ed
 
 The list rebuilds from the conversation. It survives `/reload` and compaction. No disk writes. Parallel sessions keep separate lists.
 
-Optional config at `~/.config/pi-todo/config.json` (read, never written): `maxWidgetLines` (default `12`), `collapseKey` (default `"ctrl+shift+t"`), `guidance`. Headless runs still get the tool. Nothing renders.
+Config lives in the `todo` section of `~/.pi/agent/pi-craft.json` (old `~/.config/pi-todo/config.json` still works and moves over once): `maxWidgetLines` (default `12`), `collapseKey` (default `"ctrl+shift+t"`), `guidance`. Headless runs still get the tool. Nothing renders.
 
 ## Install
 

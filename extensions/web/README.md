@@ -19,7 +19,7 @@ No dependencies. Everything runs on the Node/Bun standard library plus the
 | `searxng`    | `SEARXNG_BASE_URL` | Self-hosted metasearch, keyless.          |
 | `duckduckgo` | nothing            | HTML fallback, keyless, always available. |
 
-Set keys as env vars or in `~/.pi/web-search.json`:
+Set keys as env vars or in the `web` section of `~/.pi/agent/pi-craft.json` (old `~/.pi/web-search.json` still works and moves over once):
 
 ```json
 {
