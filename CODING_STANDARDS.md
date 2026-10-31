@@ -30,3 +30,12 @@ Authoritative coding rules for this repo. Agents read this before writing code.
 - **Return the correct state**: throw when execution fails (never error-shaped success); partial mutation fails the call while stating what succeeded, what failed, and what to reread; `content` carries the next continuation facts (path, handle, state); `details` never hides recovery info.
 - **Schemas**: `typebox` 1.x. No obsolete aliases in the schema; `prepareArguments()` normalisation only with live model-call justification.
 - **Test in isolation** before touching the live setup (disposable `PI_CODING_AGENT_DIR`); measure first-turn overhead with/without, same model and prompt. Optimise task success before token count.
+
+## 5. Writing (docs, comments, prompts)
+
+- Write like a person wrote it for this project. Say what the code does, with names and numbers from this repo. A sentence that could sit unchanged in another project's docs says nothing.
+- Never use em dashes. Rewrite with a comma, colon, or period, or a conjunction, whichever the sentence wants.
+- Active voice. Name the actor ("the job retries the request", not "the request is retried"). One idea per sentence.
+- Plain words over fancy ones (use, help, many, if). No AI vocabulary (additionally, crucial, delve, enhance, fostering, garner, intricate, interplay, landscape, pivotal, robust, seamless, showcase, testament, underscore, vibrant). No filler ("in order to", "it is important to note that"). No hedging stacks ("could potentially possibly").
+- No "not just X, but Y". No forced threes. Pick one name for a thing and repeat it. Sentence case headings. Straight quotes.
+- The repo default voice is **unslop**: follow the unslop skill on every write (docs, ADRs, README, CHANGELOG, prompts, user-facing text). Values on disk beat values in chat: what is written in the files is what this project is.

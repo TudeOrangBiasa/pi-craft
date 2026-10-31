@@ -16,8 +16,8 @@ Newest first. Each release lists what changed and how to upgrade.
 
 - Roster-driven installer (`installer/roster.ts`). It records what it deployed in an installer-owned manifest and removes stale entries from `forks/` and `settings.json` on re-run. User-installed packages stay untouched. Opt-ins (`web`) deploy only when settings enable them or with `--with web`. Re-running changes nothing.
 - Durable subagent runs. Run records persist under the session state. After `/reload` or a killed process, interrupted runs surface with a one-line notice. `get_subagent_result` returns `interrupted` plus partial output, never empty success. Resume continues the same session file. Per-agent `timeoutMs` (frontmatter, settings default) ends hung runs as `timeout`.
-- Goal mode (`/goal`, see `docs/adr/0010-goal-mode.md`). One goal per session. Idle-gated continuation. Budgets end with one wrap-up turn, then stop. State survives `/reload` and `/resume`.
-- Read-only verifier gate for `goal_complete` (see `docs/adr/0011-goal-verifier-gate.md`). Completion needs a `PASS` from a fresh read-only subagent. `FAIL` feeds back what is missing. `IMPOSSIBLE` blocks the goal. Two consecutive `FAIL`s with no new evidence block instead of looping. Off by config, falls back to worker-claim completion.
+- Goal mode (`/goal`, see `docs/adr/0010-goal-mode.md`). One goal per session, with continuation only when the agent is fully idle. The budget ends with one wrap-up turn, then the loop stops. State survives `/reload` and `/resume`.
+- Read-only verifier gate for `goal_complete` (see `docs/adr/0011-goal-verifier-gate.md`). Completion needs a `PASS` from a fresh read-only subagent. `FAIL` feeds back what is missing. `IMPOSSIBLE` blocks the goal. Two consecutive `FAIL`s with no new evidence block instead of looping. Set `PI_GOAL_VERIFY=0` to disable; without verification the worker's claim completes the goal.
 - Issue tracker moved to GitHub issues. Docs point at issues, not `.scratch/`. Triage labels include `risk:low`, `risk:medium`, `risk:high`. `.scratch/` stays gitignored for run logs.
 
 ### Upgrade

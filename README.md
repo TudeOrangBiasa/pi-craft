@@ -19,6 +19,7 @@ The roster in `installer/roster.ts` lists 11 core packages. `web` is the only op
 - `extensions/<name>`, vendored packages (see `extensions/REGISTRY.md`; LICENSE files retain original copyright).
 - `guidance/`, auto-injected TypeScript, Go, and Rust rules.
 - `installer/`, roster, manifest tracking, and tests.
+- `agents/`, `prompt/APPEND_SYSTEM.md`, reviewer agents and the system-prompt append.
 - `CHANGELOG.md`, what changed per release and how to upgrade.
 
 ## Goal mode
