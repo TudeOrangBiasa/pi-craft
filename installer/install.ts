@@ -176,6 +176,11 @@ function main(): void {
     }
     const dest = join(forksDir, name);
     copyTree(src, dest);
+    if (name === "safety-net") {
+      for (const extra of ["api.js", "api.d.ts", "index.js", "index.d.ts"]) {
+        rmSync(join(dest, "dist", extra), { recursive: true, force: true });
+      }
+    }
     const hadModules = existsSync(join(dest, "node_modules"));
     if (existsSync(join(dest, "package.json")) && !hadModules) {
       const r = Bun.spawnSync(["bun", "install", "--cwd", dest], {
