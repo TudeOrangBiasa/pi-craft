@@ -1,6 +1,6 @@
 # pi-craft
 
-Tested Pi harness config (`pi-coding-agent` by earendil-works). Owned extensions, vendored packages, guidance rules, agents, and a system prompt append. It installs into any Pi home.
+This is a config for Pi (`pi-coding-agent` by earendil-works). It is tested. It contains owned extensions, vendored packages, guidance rules, agents, and a system prompt append. It installs into any Pi home.
 
 ## Use
 
@@ -9,22 +9,22 @@ bun install
 bun run install   # copies into ~/.pi/agent (respects PI_CODING_AGENT_DIR), merges settings
 ```
 
-Restart Pi to load.
+Restart Pi to load the new files.
 
-The roster in `installer/roster.ts` lists 11 core packages. `web` is the only opt-in. The installer also installs the owned extensions (`omfg`, `bash-interceptor`, `governor`, `goal`). It tracks what it installed in its own manifest file and removes stale entries on re-run. Packages you installed yourself and your settings entries stay untouched. The installer skips opt-ins unless settings already enable them or you pass `bun run install -- --with web`. Re-running changes nothing.
+`installer/roster.ts` lists the packages. It lists 11 core packages. `web` is the only opt-in package. The installer installs these packages. It also installs the owned extensions (`omfg`, `bash-interceptor`, `governor`, `goal`). It writes what it installs to a manifest file. On the next run, it removes entries that are no longer in the roster. It does not touch packages that you install. It does not touch your settings entries. It skips opt-ins unless settings enable them. You can also enable an opt-in with `bun run install -- --with web`. A second run changes nothing.
 
 ## Layout
 
-- `extensions/omfg`, `extensions/bash-interceptor`, `extensions/governor`, `extensions/goal`, owned and tested (`bun run check`).
-- `extensions/<name>`, vendored packages (see `extensions/REGISTRY.md`; LICENSE files retain original copyright).
-- `guidance/`, auto-injected TypeScript, Go, and Rust rules.
-- `installer/`, roster, manifest tracking, and tests.
-- `agents/`, `prompt/APPEND_SYSTEM.md`, reviewer agents and the system-prompt append.
-- `CHANGELOG.md`, what changed per release and how to upgrade.
+- `extensions/omfg`, `extensions/bash-interceptor`, `extensions/governor`, `extensions/goal`. These are owned extensions. They are tested with `bun run check`.
+- `extensions/<name>`. These are vendored packages. See `extensions/REGISTRY.md`. LICENSE files retain original copyright.
+- `guidance/`. These are TypeScript, Go, and Rust rules. The installer injects them automatically.
+- `installer/`. This is the roster, the manifest code, and the tests.
+- `agents/`, `prompt/APPEND_SYSTEM.md`. These are reviewer agents and the system-prompt append.
+- `CHANGELOG.md`. It lists changes per release and upgrade steps.
 
 ## Goal mode
 
-`/goal <condition>` starts an autonomous loop. Pi keeps taking turns until the condition holds, a real blocker appears, or the budget runs out. `goal_complete` does not end the goal on the worker's word. It starts a read-only verifier (a fresh subagent with no write tools) that must return `PASS`. See `docs/adr/0010-goal-mode.md` and `docs/adr/0011-goal-verifier-gate.md`.
+Use `/goal <condition>` to start a goal. Pi then takes turns without your input. It stops when the condition is true. It also stops on a real blocker. It also stops when the budget ends. `goal_complete` does not end the goal alone. It starts a verifier. The verifier is a new subagent. It has no write tools. It can only read. The goal ends when the verifier returns `PASS`. See `docs/adr/0010-goal-mode.md` and `docs/adr/0011-goal-verifier-gate.md`.
 
 ## Develop
 
