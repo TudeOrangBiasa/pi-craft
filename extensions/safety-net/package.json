@@ -64,16 +64,12 @@
   },
   "packageManager": "bun@1.4.0",
   "keywords": [
-    "claude-code",
-    "opencode",
-    "safety",
-    "plugin",
-    "security",
     "pi-package",
-    "cursor",
-    "amp",
-    "grok",
-    "grok-build"
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "safety",
+    "security"
   ],
   "gitHead": "5837fd3f459b021a7ba92bee3b60c369efb04612"
 }
