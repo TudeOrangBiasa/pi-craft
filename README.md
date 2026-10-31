@@ -1,6 +1,6 @@
 # pi-craft
 
-Minimal, tested Pi (`pi-coding-agent` by earendil-works) harness config. Owned extensions, vendored packages, guidance rules, agents, and system prompt. It installs into any Pi home.
+Tested Pi harness config (`pi-coding-agent` by earendil-works). Owned extensions, vendored packages, guidance rules, agents, and a system prompt append. It installs into any Pi home.
 
 ## Use
 
@@ -19,17 +19,11 @@ The roster in `installer/roster.ts` lists 11 core packages. `web` is the only op
 - `extensions/<name>`, vendored packages (see `extensions/REGISTRY.md`; LICENSE files retain original copyright).
 - `guidance/`, auto-injected TypeScript, Go, and Rust rules.
 - `installer/`, roster, manifest tracking, and tests.
-- `agents/`, `prompt/APPEND_SYSTEM.md`, reviewer agents and the system-prompt append.
+- `CHANGELOG.md`, what changed per release and how to upgrade.
 
 ## Goal mode
 
 `/goal <condition>` starts an autonomous loop. Pi keeps taking turns until the condition holds, a real blocker appears, or the budget runs out. `goal_complete` does not end the goal on the worker's word. It starts a read-only verifier (a fresh subagent with no write tools) that must return `PASS`. See `docs/adr/0010-goal-mode.md` and `docs/adr/0011-goal-verifier-gate.md`.
-
-## Removed
-
-The `rtk` optimizer is gone (see `docs/adr/0009-remove-rtk.md`). Bash commands run verbatim and `governor` is the only output bound. The external `rtk` binary is now unused. Remove it by hand if you want (`cargo uninstall rtk` or delete it from `~/.local/bin`); the agent never uninstalls it.
-
-Also removed: the `btw`, `preview`, and `advisor` packages. Side questions live in `/clear`, preview pulled in puppeteer-core, and goal mode's verifier replaces second opinions. The non-Pi `safety-net` bundles are gone too (the Pi entry stays).
 
 ## Develop
 
