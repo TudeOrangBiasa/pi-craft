@@ -11,7 +11,7 @@ import type { AgentConfig } from "./types.js";
 
 /**
  * All known built-in tool names, derived from pi's own tool factories rather
- * than hardcoded so the set tracks pi-mono if it adds/renames a built-in.
+ * than hardcoded so the set tracks upstream Pi if it adds/renames a built-in.
  * `createCodingTools` → read/bash/edit/write; `createReadOnlyTools` →
  * read/grep/find/ls; their de-duplicated union is the 7 built-ins
  * (read, bash, edit, write, grep, find, ls). The `cwd` only binds tool

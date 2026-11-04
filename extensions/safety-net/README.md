@@ -8,7 +8,7 @@ Shipped as a prebuilt `dist/` bundle. Only `./dist/pi/index.js` loads in Pi. Do 
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## License
 

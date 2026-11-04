@@ -193,7 +193,7 @@ export function parseExtSelectors(entries: string[]): {
     const body = raw.slice("ext:".length);
     const slash = body.indexOf("/");
     // Extension name matches case-insensitively (matches the loader-side canonical
-    // name). Tool names are case-preserved — they're matched against pi-mono's
+    // name). Tool names are case-preserved — they're matched against upstream Pi's
     // registered identifiers, which are case-sensitive.
     const name = (slash === -1 ? body : body.slice(0, slash)).trim().toLowerCase();
     if (!name) continue;
@@ -503,7 +503,7 @@ async function resolveChildSessionScope(
   const warn = inputs.onToolActivity;
   // Plain entries in `tools:` are expected to be built-in names (extension tools
   // go through `ext:`), so an unknown name there is unambiguously a typo. Previously
-  // this produced a silently broken agent (#75) — pi-mono accepted the bogus name
+  // this produced a silently broken agent (#75) — upstream Pi accepted the bogus name
   // into the allowlist, then dropped it at registration with no signal back.
   if (agentConfig?.builtinToolNames?.length) {
     const knownBuiltins = new Set(BUILTIN_TOOL_NAMES);

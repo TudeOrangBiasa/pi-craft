@@ -8,7 +8,7 @@ Without a describer, or on failure, the image becomes `[Image: description unava
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## License
 

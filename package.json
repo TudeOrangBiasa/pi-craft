@@ -1,5 +1,5 @@
 {
-  "name": "craft-harness",
+  "name": "pi-craft",
   "module": "index.ts",
   "type": "module",
   "private": true,

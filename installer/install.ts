@@ -15,7 +15,7 @@ import { addPackageEntry, enabledForks, mergeSettings } from "./settings.js";
 import type { PiSettings } from "./settings.js";
 import { loadManifest, MANIFEST_FILENAME, saveManifest } from "./manifest.js";
 
-// Plugin-based installer for the craft-harness Pi config.
+// Plugin-based installer for the pi-craft Pi config.
 // Layout: extensions/<name>/ = source of truth for EVERY extension.
 // Roster-driven: ROSTER (installer/roster.ts, matching extensions/REGISTRY.md)
 // is the single deploy driver. Opt-ins deploy only when already enabled in

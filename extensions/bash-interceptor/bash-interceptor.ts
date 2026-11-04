@@ -1,7 +1,7 @@
 import type { ExtensionAPI, BashToolInput } from "@earendil-works/pi-coding-agent";
 
 /**
- * Bash interceptor for vanilla Pi (pi-mono).
+ * Bash interceptor for pi-craft (vanilla Pi).
  *
  * Ports OMP's bashInterceptor to vanilla Pi as an extension. When the model reaches for `bash`
  * to do something a dedicated tool already does better, we block the call and steer it to the

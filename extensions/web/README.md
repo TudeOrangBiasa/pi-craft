@@ -70,7 +70,7 @@ targets. To allow private targets (intranet docs, local dev servers), set:
 
 ## Install
 
-Install via the craft-harness installer (`bun run install -- --with web` from
+Install via the pi-craft installer (`bun run install -- --with web` from
 repo root), or enable the deployed `web` package in Pi settings.
 
 ## License

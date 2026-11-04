@@ -1,7 +1,7 @@
 {
   "name": "governor",
   "version": "0.1.0",
-  "description": "Craft-harness extension. Caps runaway tool output (500 lines / 50KB ceiling) with tail + notice.",
+  "description": "Owned pi-craft extension. Caps runaway tool output (500 lines / 50KB ceiling) with tail + notice.",
   "license": "MIT",
   "type": "module",
   "exports": {

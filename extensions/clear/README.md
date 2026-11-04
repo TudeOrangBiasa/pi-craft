@@ -38,7 +38,7 @@ never steers the running turn.
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## License
 

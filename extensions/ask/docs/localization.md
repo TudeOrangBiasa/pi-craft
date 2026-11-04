@@ -7,7 +7,7 @@ How the dialog picks its language, which languages ship, and how to add one.
 The extension works standalone: install only this package and you get the full dialog in
 English. Localization needs one more install:
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 Restart your Pi session.
 

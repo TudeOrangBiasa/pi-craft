@@ -8,7 +8,7 @@ Non-interactive runs never see the tool. RPC and ACP hosts use native dialogs.
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## License
 

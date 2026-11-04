@@ -8,7 +8,7 @@ Config lives in the `todo` section of `~/.pi/agent/pi-craft.json` (old `~/.confi
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## License
 

@@ -8,7 +8,7 @@ Set `PI_TOOL_REPAIR_DEBUG=1` to log repair diagnostics to stderr.
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## License
 

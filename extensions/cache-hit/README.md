@@ -10,7 +10,7 @@ The prediction is a UI-only transcript notification. It is not sent to the model
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## How it works
 

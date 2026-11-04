@@ -8,7 +8,7 @@ Pi loads live config from `~/.pi/agent/` (extensions, forks, settings, prompt). 
 
 ## Decision
 
-All code lives in `craft-harness/` (`extensions/`, `agents/`, `guidance/`, `prompt/`). Nothing is authored in `~/.pi/agent/`. `installer/install.ts` copies repo → live home and merges settings. After any repo edit, deploy by copy and verify with `cmp`.
+All code lives in `pi-craft/` (`extensions/`, `agents/`, `guidance/`, `prompt/`). Nothing is authored in `~/.pi/agent/`. `installer/install.ts` copies repo → live home and merges settings. After any repo edit, deploy by copy and verify with `cmp`.
 
 ## Consequences
 

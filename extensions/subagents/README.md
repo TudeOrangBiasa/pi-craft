@@ -18,7 +18,7 @@ Pi extension for parallel subagents. Spawn background agents, watch them in Flee
 
 ## Install
 
-Install via the craft-harness installer (`bun run install` from repo root).
+Install via the pi-craft installer (`bun run install` from repo root).
 
 ## License
 
