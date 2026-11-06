@@ -22,7 +22,7 @@ TypeScript + Bun. Lint `oxlint`, format `oxfmt`. Monadic code style. See `CODING
 | TTSR | Time Travelling Stream Rules — omfg's named stream-rule engine (gate/replace/inject over the token/tool stream) | filter |
 | anchor | `aB3`-style row handle from `read`; the only valid edit address for `replace`/`insert` | line number |
 | displacement | Removing a core tool from the active set at `session_start` because ours supersedes it | disable, hide |
-| core / opt-in | Core = default roster; opt-in = parked until enabled in settings | — |
+| core | The default roster: all 7 packages deploy every run, no opt-ins | — |
 
 ## Decisions
 

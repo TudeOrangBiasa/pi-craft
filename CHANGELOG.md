@@ -6,6 +6,8 @@ Newest entries are first. Each release lists changes and upgrade steps.
 
 ### Removed
 
+- The `goal`, `vision`, `cache-hit`, `clear`, and `web` extensions. The roster is now 7 core packages with no opt-ins. The installer drops opt-in machinery (`--with`, tiers). Next `bun run install` removes their fork dirs and settings entries with one `removed package: <name>` line each.
+
 - The `rtk` optimizer package. Also removed: its Pi-side config fragment (`extensions/_pi-extensions/pi-rtk-optimizer`). Bash commands now run as typed. `governor` is the only output limit. See `docs/adr/0009-remove-rtk.md`.
 - The `btw`, `preview`, and `advisor` packages. `/clear` answers side questions. `preview` used puppeteer-core. The goal verifier replaces second opinions.
 - The non-Pi `safety-net` bundles (`dist/amp`, `dist/openclaw`, `dist/bin`). The Pi entry (`dist/pi`) stays.
@@ -14,7 +16,7 @@ Newest entries are first. Each release lists changes and upgrade steps.
 
 ### Added
 
-- A roster-driven installer (`installer/roster.ts`). It writes what it installs to a manifest file. It is a manifest that the installer owns. On the next run, it removes stale entries from `forks/` and `settings.json`. It does not touch packages that you install. It installs opt-ins (`web`) only when settings enable them. You can also use `--with web`. A second run changes nothing.
+- A roster-driven installer (`installer/roster.ts`). It writes what it installs to a manifest file. It is a manifest that the installer owns. On the next run, it removes stale entries from `forks/` and `settings.json`. It does not touch packages that you install. Everything deploys every run. A second run changes nothing.
 - Durable subagent runs. Run records are stored under the session state. After `/reload` or a killed process, interrupted runs are shown with a one-line notice. `get_subagent_result` returns `interrupted` and partial output. It never returns empty success. Resume continues in the same session file. Each agent has a `timeoutMs` limit (from frontmatter or from the settings default). A hung run ends as `timeout`.
 - Goal mode (`/goal`, see `docs/adr/0010-goal-mode.md`). Each session has a maximum of one goal. Pi continues only when the agent is fully idle. The budget ends with one wrap-up turn. Then the loop stops. State is kept across `/reload` and `/resume`.
 - A read-only verifier for `goal_complete` (see `docs/adr/0011-goal-verifier-gate.md`). The goal needs a `PASS` from a new read-only subagent. `FAIL` returns what is missing. `IMPOSSIBLE` blocks the goal. Two `FAIL` results in a row with no new evidence also block the goal. Set `PI_GOAL_VERIFY=0` to turn off verification. Without verification, the worker claim ends the goal.
