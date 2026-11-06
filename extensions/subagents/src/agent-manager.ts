@@ -371,9 +371,13 @@ export class AgentManager {
 
   /**
    * Re-register runs that never settled before a restart as `interrupted`.
-   * Called once from `session_start` with the replay of the session's own
-   * branch — never from anywhere else, so a mid-session call cannot resurrect
-   * a record that settled normally.
+   * Called from `session_start` with the replay of the session's own branch,
+   * and re-run on `session_compact`/`session_tree` when the active branch may
+   * have changed. Idempotent: known ids are skipped, and the flip to
+   * `interrupted` is persisted so a replay never restores twice. A mid-session
+   * call cannot resurrect a normally-settled run: `loadInterrupted` is
+   * last-write-wins on the active branch, so a settled run's terminal entry
+   * excludes it from the restore list.
    *
    * The record keeps its id, type, description, start time and whatever the
    * run produced; the session is NOT reopened here (a restart may surface

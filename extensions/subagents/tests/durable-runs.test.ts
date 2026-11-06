@@ -149,6 +149,31 @@ test("compact and tree re-restore without duplicates or notices", async () => {
   ).toHaveLength(1);
 });
 
+test("compact and tree never resurrect a settled run", async () => {
+  const settled: AgentRecord = {
+    id: "agent-done-1",
+    type: "general-purpose",
+    description: "done work",
+    status: "completed",
+    toolUses: 1,
+    startedAt: Date.now() - 60_000,
+    completedAt: Date.now(),
+    lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+    compactionCount: 0,
+    isBackground: true,
+    resultConsumed: false,
+    result: "done",
+  };
+  ctx.sessionManager.appendCustomEntry("subagents:run", toPersistedRun(settled));
+  const fresh = createFakePi();
+  await activateExtension(fresh, ctx);
+  await fresh.handlers.get("session_compact")?.({}, ctx);
+  await fresh.handlers.get("session_tree")?.({}, ctx);
+  expect(
+    fresh.sentMessages.filter((m: any) => m?.customType === "subagents-interrupted"),
+  ).toHaveLength(0);
+});
+
 test("expired run ends as timeout and reports like a failure", async () => {
   // No gate: each turn answers with a tool call, forever. The run's own
   // deadline fires session.abort() mid-loop, which pi settles between turns —
