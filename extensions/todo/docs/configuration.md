@@ -4,9 +4,34 @@ Every option
 `todo`
 reads, where the file lives, and exactly what happens when a value is wrong.
 
-## Where the file lives
+## Where the settings live
 
-The config file is optional. It is resolved in this order:
+Set options in the `todo` section of `~/.pi/agent/pi-craft.json`:
+
+```json
+{
+  "todo": {
+    "maxWidgetLines": 8,
+    "collapseKey": "alt+t",
+    "guidance": {
+      "promptSnippet": "Use the `todo` tool to track multi-step work before starting it.",
+      "promptGuidelines": [
+        "Create one task per discrete step.",
+        "Mark a task in_progress while working on it; completed when done."
+      ]
+    }
+  }
+}
+```
+
+The unified file is optional. With no `todo` section every default applies.
+`todo` never writes this file. You create and edit it yourself, and the
+extension only reads it, plus a one-time copy of a migrated old section.
+
+### Old paths (fallback only)
+
+When the unified file has no `todo` section, the old files are resolved in
+this order and migrate over once:
 
 1. `$XDG_CONFIG_HOME/pi-todo/config.json`, used when `XDG_CONFIG_HOME` is set
    to an absolute path. A bare `~` or a leading `~/` is expanded first; a `~user`
@@ -19,29 +44,7 @@ The config file is optional. It is resolved in this order:
    malformed, you get a warning and defaults. It does **not** quietly read the
    legacy file instead.
 
-Both files missing means every default applies. Malformed JSON prints a
-`pi-todo: invalid JSON at …` warning and is treated as `{}`. A JSON array or
-a non-object value (`null`, a string, a number, a boolean) is silently treated as
-`{}`, with no warning.
-
-`pi-todo` never writes this file. You create and edit it yourself, and the
-extension only reads it.
-
-## Example
-
-```json
-{
-  "maxWidgetLines": 8,
-  "collapseKey": "alt+t",
-  "guidance": {
-    "promptSnippet": "Use the `todo` tool to track multi-step work before starting it.",
-    "promptGuidelines": [
-      "Create one task per discrete step.",
-      "Mark a task in_progress while working on it; completed when done."
-    ]
-  }
-}
-```
+Both files missing means every default applies.
 
 ## `maxWidgetLines`
 

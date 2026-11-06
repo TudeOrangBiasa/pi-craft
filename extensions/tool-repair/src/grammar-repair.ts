@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { piCraftAgentDir } from "./pi-craft-settings.js";
 import { readSection } from "./pi-craft-settings.js";
 
 export const GRAMMAR_NAMES = [
@@ -120,7 +120,7 @@ export function loadGrammarRepairConfig(path?: string): GrammarRepairConfig {
 }
 
 export function defaultConfigPath(): string {
-  return join(getAgentDir(), "extensions", "pi-tool-repair.json");
+  return join(piCraftAgentDir(), "extensions", "pi-tool-repair.json");
 }
 
 export function normalizeGrammarRepairConfig(raw: Partial<GrammarRepairConfig> = {}): GrammarRepairConfig {

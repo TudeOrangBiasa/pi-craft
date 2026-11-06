@@ -5,31 +5,32 @@ wrong.
 
 ## The config file
 
-```
-~/.config/pi-ask-user-question/config.json
-```
-
-The file is optional — with no config at all, every setting takes its default. This
-package only ever _reads_ the file; it never creates, writes or chmods it, so its
-permissions are whatever you give it.
-
-A complete example:
+Set options in the `ask` section of `~/.pi/agent/pi-craft.json`:
 
 ```json
 {
-  "collapseKey": "alt+o",
-  "guidance": {
-    "description": "Ask the user structured questions whenever requirements are ambiguous.",
-    "promptSnippet": "Ask me before guessing on anything ambiguous",
-    "promptGuidelines": [
-      "Batch every clarifying question into one ask_user_question call.",
-      "Put your recommended option first and suffix it with (Recommended)."
-    ]
+  "ask": {
+    "collapseKey": "alt+o",
+    "guidance": {
+      "description": "Ask the user structured questions whenever requirements are ambiguous.",
+      "promptSnippet": "Ask me before guessing on anything ambiguous",
+      "promptGuidelines": [
+        "Batch every clarifying question into one ask_user_question call.",
+        "Put your recommended option first and suffix it with (Recommended)."
+      ]
+    }
   }
 }
 ```
 
-### Where the file is looked up
+The unified file is optional. With no `ask` section every setting takes its
+default. This package only reads the file. It writes the migrated section
+once when falling back to an old path, never deletes or chmods anything.
+
+### Old paths (fallback only)
+
+When the unified file has no `ask` section, the old files still work and
+migrate over once:
 
 1. `$XDG_CONFIG_HOME/pi-ask-user-question/config.json`, if `XDG_CONFIG_HOME` is set,
    non-empty and absolute. A leading `~` is expanded first; a relative value is ignored.
