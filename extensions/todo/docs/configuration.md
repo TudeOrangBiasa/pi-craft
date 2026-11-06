@@ -46,6 +46,13 @@ this order and migrate over once:
 
 Both files missing means every default applies.
 
+### When a file is invalid
+
+Bad JSON in the unified file is silent: the loader falls back to defaults
+with no warning. A JSON array or a non-object value (`null`, a string, a
+number, a boolean) is silently treated as `{}`, also with no warning.
+Individual keys with the wrong type are dropped back to their default.
+
 ## `maxWidgetLines`
 
 **Default `12`.** The content-row budget for the overlay. The heading row and,
@@ -68,11 +75,11 @@ overlay.
 The value is trimmed and lowercased, then matched against Pi's keybinding
 grammar: zero or more distinct modifiers joined by `+`, then a base key.
 
-| Part      | Accepted                                                                                                                                                                                  |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Modifiers | `ctrl`, `shift`, `alt`, `super`, each at most once                                                                                                                                        |
-| Base key  | one printable character (`a`, `7`, `]`, `/`, …)                                                                                                                                           |
-| Base key  | a named key: `escape`, `esc`, `enter`, `return`, `tab`, `space`, `backspace`, `delete`, `insert`, `clear`, `home`, `end`, `pageup`, `pagedown`, `up`, `down`, `left`, `right`, `f1`–`f12` |
+| Part      | Accepted                                                                                                                                                                                     |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Modifiers | `ctrl`, `shift`, `alt`, `super`, each at most once                                                                                                                                           |
+| Base key  | one printable character (`a`, `7`, `]`, `/`, …)                                                                                                                                              |
+| Base key  | a named key: `escape`, `esc`, `enter`, `return`, `tab`, `space`, `backspace`, `delete`, `insert`, `clear`, `home`, `end`, `pageup`, `pagedown`, `up`, `down`, `left`, `right`, `f1` to `f12` |
 
 Examples: `alt+o`, `ctrl+shift+t`, `super+alt+f5`.
 

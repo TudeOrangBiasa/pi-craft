@@ -8,7 +8,7 @@ Every extension in `extensions/` with owner, role, and status. Core = default ro
 | ---- | ---- | ------ |
 | `omfg` | Stream rules (TTSR) + guidance injector | core |
 | `bash-interceptor` | Bash→tool steering | core |
-| `governor` | Central output bound | core |
+| `goal` | Autonomous goal loop + verifier gate | core |
 
 ## Vendored (derived from public sources; LICENSE files retain original copyright)
 
