@@ -2,6 +2,12 @@
 
 > Riset pola daya tahan sesi: apa yang bikin sesi Pi selamat dari crash/reload/resume, dan mana yang worth diadopsi pi-craft. Bahasa santai, tapi tiap klaim teknis ada sitasinya.
 
+> Catatan pasca-trim: referensi ke `goal`, `vision`, `cache-hit`, `clear`, dan
+> `web` adalah catatan historis, kodenya sudah dihapus dari repo. Pola
+> durability-nya tetap berlaku sebagai referensi. Rekomendasi #3 (re-replay
+> compact/tree) sudah dieksekusi untuk subagents; versi goal-nya ikut
+> terhapus bersama extension-nya.
+
 ## Ringkasan
 
 - Fondasi durability di Pi itu simpel: semua state jadi **append-only entries di file JSONL sesi**, terus di-**replay pas `session_start`**. Crash tinggal replay ulang, nggak ada state misterius di RAM yang hilang (`extensions/subagents/src/run-store.ts:4-16`, [session-format.md](https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/session-format.md), diakses 2026-11-06).

@@ -18,7 +18,7 @@ describe("idempotency", () => {
     const home = makePiHome();
     const stub = makeStub();
 
-    assertOk(runInstaller(home, ["--with", "web"], stub));
+    assertOk(runInstaller(home, [], stub));
     const installsAfterFirst = installLog(stub);
     expect(installsAfterFirst.length).toBeGreaterThan(0);
 

@@ -13,13 +13,9 @@ export const ROSTER: readonly PackageEntry[] = [
   { name: "hashline", tier: "core" },
   { name: "subagents", tier: "core" },
   { name: "fff", tier: "core" },
-  { name: "vision", tier: "core" },
   { name: "safety-net", tier: "core" },
   { name: "ask", tier: "core" },
-  { name: "clear", tier: "core" },
   { name: "todo", tier: "core" },
-  { name: "cache-hit", tier: "core" },
-  { name: "web", tier: "opt-in" },
 ];
 
 // Owned extensions deployed to extensions/ (always installed).
@@ -30,4 +26,4 @@ export const SINGLE_FILE: readonly string[] = ["bash-interceptor.ts", "governor.
 // (A sibling .ts next to a top-level entry would be loaded as its own
 // extension — rule 1 of discovery — so omfg ships as a directory with its
 // package.json manifest instead.)
-export const DIR_EXTENSIONS: readonly string[] = ["omfg", "goal"];
+export const DIR_EXTENSIONS: readonly string[] = ["omfg"];

@@ -2,8 +2,7 @@
 //
 // File: `<agentDir>/pi-craft.json` (`~/.pi/agent/pi-craft.json`, honoring
 // `PI_CODING_AGENT_DIR` like every other Pi path). Sections use the extension
-// dir name: ask, todo, web, subagents, vision, goal, hashline, tool-repair,
-// omfg, fff.
+// dir name: ask, todo, subagents, hashline, tool-repair, omfg, fff.
 //
 // Migration: when the unified file (or a section) is missing but the
 // extension's old file exists, the old file wins for that read and its
@@ -101,7 +100,7 @@ export function readSection(section: string, legacyPath: string): Record<string,
 
 /**
  * Read one extension's section from the unified file only. No legacy
- * fallback, no migration. Use for sections with no old file (goal).
+ * fallback, no migration.
  */
 export function readUnifiedSection(section: string): Record<string, unknown> {
   return sectionOf(readJsonObject(piCraftPath()), section);

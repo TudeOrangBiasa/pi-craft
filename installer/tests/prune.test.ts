@@ -53,7 +53,7 @@ describe("prune", () => {
     // Core roster still deployed.
     const forks = readdirSync(forksDir);
     expect(forks).toContain("tool-repair");
-    expect(forks).toContain("cache-hit");
+    expect(forks).toContain("todo");
     expect(installLog(stub).filter((dest) => dest.includes("retired-pkg"))).toEqual([]);
     expect(readFileSync(join(forksDir, "tool-repair", "tool-repair.ts"), "utf-8")).toContain(
       "tool",
