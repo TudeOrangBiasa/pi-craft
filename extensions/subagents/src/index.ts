@@ -91,7 +91,7 @@ import {
   streamToOutputFile,
   writeInitialEntry,
 } from "./output-file.js";
-import { loadInterrupted } from "./run-store.js";
+import { loadInterrupted, type RunStoreReader } from "./run-store.js";
 import {
   applyAndEmitLoaded,
   loadSettings,
@@ -768,16 +768,13 @@ export default function (pi: ExtensionAPI) {
   // Capture ctx from session_start for the manager callbacks above.
   // Also binds the durable run writer and re-surfaces runs that never settled
   // before a reload/crash: they come back as `interrupted`, with one notice.
-  pi.on("session_start", async (_event, ctx) => {
-    currentCtx = ctx;
-    if (ctx.hasUI) {
-      widget.setUICtx(ctx.ui);
-      fleet.setUICtx(ctx.ui as any);
-    }
-    manager.clearCompleted(true);
-    manager.setRunStore(pi);
-    const restored = manager.restoreInterrupted(loadInterrupted(ctx.sessionManager));
-    if (restored.length > 0) {
+  // Compact/tree re-run the same restore: the active branch may have changed,
+  // and restoreInterrupted is idempotent (skips known ids, flips status to
+  // `interrupted` so a replay never restores twice). Notices only fire on
+  // session_start so compact/tree stays quiet.
+  function restoreRuns(reader: RunStoreReader, notify: boolean): AgentRecord[] {
+    const restored = manager.restoreInterrupted(loadInterrupted(reader));
+    if (notify && restored.length > 0) {
       const ids = restored.map((r) => r.id).join(", ");
       pi.sendMessage(
         {
@@ -788,6 +785,23 @@ export default function (pi: ExtensionAPI) {
         { deliverAs: "followUp", triggerTurn: false },
       );
     }
+    return restored;
+  }
+  pi.on("session_start", async (_event, ctx) => {
+    currentCtx = ctx;
+    if (ctx.hasUI) {
+      widget.setUICtx(ctx.ui);
+      fleet.setUICtx(ctx.ui as any);
+    }
+    manager.clearCompleted(true);
+    manager.setRunStore(pi);
+    restoreRuns(ctx.sessionManager, true);
+  });
+  pi.on("session_compact", async (_event, ctx) => {
+    restoreRuns(ctx.sessionManager, false);
+  });
+  pi.on("session_tree", async (_event, ctx) => {
+    restoreRuns(ctx.sessionManager, false);
   });
 
   pi.on("session_before_switch", () => {

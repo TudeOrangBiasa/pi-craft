@@ -127,6 +127,28 @@ test("session_start surfaces interrupted runs with a one-line notice", async () 
   expect(String((notices[0] as any).content)).toContain("agent-stale-1");
 });
 
+test("compact and tree re-restore without duplicates or notices", async () => {
+  ctx.sessionManager.appendCustomEntry("subagents:run", {
+    id: "agent-compact-1",
+    type: "general-purpose",
+    description: "compact work",
+    status: "running",
+    startedAt: Date.now() - 60_000,
+    toolUses: 2,
+  });
+  const fresh = createFakePi();
+  await activateExtension(fresh, ctx);
+  expect(
+    fresh.sentMessages.filter((m: any) => m?.customType === "subagents-interrupted"),
+  ).toHaveLength(1);
+  // Compact and tree re-run the restore: same id skipped, no extra notice.
+  await fresh.handlers.get("session_compact")?.({}, ctx);
+  await fresh.handlers.get("session_tree")?.({}, ctx);
+  expect(
+    fresh.sentMessages.filter((m: any) => m?.customType === "subagents-interrupted"),
+  ).toHaveLength(1);
+});
+
 test("expired run ends as timeout and reports like a failure", async () => {
   // No gate: each turn answers with a tool call, forever. The run's own
   // deadline fires session.abort() mid-loop, which pi settles between turns —

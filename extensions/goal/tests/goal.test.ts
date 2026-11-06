@@ -185,4 +185,25 @@ describe("goal lifecycle", () => {
     expect(lastNotification(showCtx)).toContain("do the thing");
     expect(lastNotification(showCtx)).toContain("active");
   });
+
+  test("state re-replays on compact and tree", async () => {
+    const first = createFakePi();
+    activate(first.pi);
+    await startGoal(first, "do the thing --max-turns 5");
+    const persisted = first.appendedEntries.map((e) => ({
+      type: "custom",
+      customType: e.customType,
+      data: e.data,
+    }));
+    const second = createFakePi();
+    activate(second.pi);
+    expect(second.activeTools).not.toContain(GOAL_COMPLETE_TOOL);
+    const ctx = createFakeCtx({ entries: persisted, activeTools: ["read", "bash"] });
+    await fire(second, "session_compact", { type: "session_compact" }, ctx);
+    expect(second.activeTools).toContain(GOAL_COMPLETE_TOOL);
+    await fire(second, "session_tree", { type: "session_tree" }, ctx);
+    const showCtx = createFakeCtx();
+    await runCommand(second, "goal", "", showCtx);
+    expect(lastNotification(showCtx)).toContain("do the thing");
+  });
 });

@@ -874,7 +874,9 @@ export default function (pi: ExtensionAPI): void {
   });
 
   // Restore across /reload + /resume: session entries replay into ctx.
-  pi.on("session_start", (_event, ctx) => {
+  // Also re-replay on compact/tree: the active branch may have changed, so
+  // in-memory state is rebuilt from the branch that survived.
+  function replayIntoStore(ctx: ExtensionContext): void {
     try {
       const restored = restoreFromEntries(ctx.sessionManager.getEntries());
       if (restored === undefined) return;
@@ -886,5 +888,14 @@ export default function (pi: ExtensionAPI): void {
     } catch {
       /* a corrupt entry must not break session start */
     }
+  }
+  pi.on("session_start", (_event, ctx) => {
+    replayIntoStore(ctx);
+  });
+  pi.on("session_compact", (_event, ctx) => {
+    replayIntoStore(ctx);
+  });
+  pi.on("session_tree", (_event, ctx) => {
+    replayIntoStore(ctx);
   });
 }
