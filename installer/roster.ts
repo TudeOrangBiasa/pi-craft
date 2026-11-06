@@ -1,21 +1,14 @@
-// Single deploy driver for the installer: every package shipped to forks/,
-// each with its tier. Must match the Vendored table in extensions/REGISTRY.md.
-
-export type Tier = "core" | "opt-in";
-
-export interface PackageEntry {
-  readonly name: string;
-  readonly tier: Tier;
-}
-
-export const ROSTER: readonly PackageEntry[] = [
-  { name: "tool-repair", tier: "core" },
-  { name: "hashline", tier: "core" },
-  { name: "subagents", tier: "core" },
-  { name: "fff", tier: "core" },
-  { name: "safety-net", tier: "core" },
-  { name: "ask", tier: "core" },
-  { name: "todo", tier: "core" },
+// Single deploy driver for the installer: every package shipped to forks/.
+// Must match the Vendored table in extensions/REGISTRY.md. All core, no
+// opt-ins: deploy everything, every run.
+export const ROSTER: readonly string[] = [
+  "tool-repair",
+  "hashline",
+  "subagents",
+  "fff",
+  "safety-net",
+  "ask",
+  "todo",
 ];
 
 // Owned extensions deployed to extensions/ (always installed).

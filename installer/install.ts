@@ -11,33 +11,23 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DIR_EXTENSIONS, ROSTER, SINGLE_FILE } from "./roster.js";
-import { addPackageEntry, enabledForks, mergeSettings } from "./settings.js";
+import { mergeSettings } from "./settings.js";
 import type { PiSettings } from "./settings.js";
 import { loadManifest, MANIFEST_FILENAME, saveManifest } from "./manifest.js";
 
 // Plugin-based installer for the pi-craft Pi config.
 // Layout: extensions/<name>/ = source of truth for EVERY extension.
 // Roster-driven: ROSTER (installer/roster.ts, matching extensions/REGISTRY.md)
-// is the single deploy driver. Opt-ins deploy only when already enabled in
-// the user's settings or passed via --with. An installer-owned manifest in
-// the Pi home tracks what was deployed; re-runs prune stale manifest-owned
-// packages from forks/ and settings.json. Entries not in the manifest
-// (user-installed) are never touched.
-// Idempotent: safe to re-run. Never touches anything outside the Pi home
-// except reading this repo.
+// is the single deploy driver. Everything deploys, every run. An
+// installer-owned manifest in the Pi home tracks what was deployed; re-runs
+// prune stale manifest-owned packages from forks/ and settings.json. Entries
+// not in the manifest (user-installed) are never touched.
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), "..");
 const PI =
   process.env.PI_CODING_AGENT_DIR?.trim() !== "" && process.env.PI_CODING_AGENT_DIR !== undefined
     ? (process.env.PI_CODING_AGENT_DIR as string)
     : join(homedir(), ".pi", "agent");
-
-const CORE_NAMES = new Set(
-  ROSTER.filter((entry) => entry.tier === "core").map((entry) => entry.name),
-);
-const OPT_IN_NAMES = new Set(
-  ROSTER.filter((entry) => entry.tier === "opt-in").map((entry) => entry.name),
-);
 
 function copyTree(src: string, dest: string): void {
   mkdirSync(dest, { recursive: true });
@@ -47,45 +37,6 @@ function copyTree(src: string, dest: string): void {
     const d = join(dest, entry);
     if (statSync(s).isDirectory()) copyTree(s, d);
     else copyFileSync(s, d);
-  }
-}
-
-function parseArgs(argv: readonly string[]): { withNames: string[] } {
-  const withNames: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--with") {
-      if (i + 1 >= argv.length) {
-        console.error("error: --with needs a package name");
-        process.exit(1);
-      }
-      withNames.push(argv[i + 1]);
-      i++;
-    } else if (arg.startsWith("--with=")) {
-      const name = arg.slice("--with=".length);
-      if (name === "") {
-        console.error("error: --with needs a package name");
-        process.exit(1);
-      }
-      withNames.push(name);
-    } else {
-      console.error(`error: unknown argument: ${arg} (usage: install.ts [--with <name>]...)`);
-      process.exit(1);
-    }
-  }
-  return { withNames };
-}
-
-function validateWithNames(withNames: readonly string[]): void {
-  for (const name of withNames) {
-    if (CORE_NAMES.has(name)) {
-      console.error(`error: --with ${name}: already core (always deployed)`);
-      process.exit(1);
-    }
-    if (!OPT_IN_NAMES.has(name)) {
-      console.error(`error: --with ${name}: not an opt-in package in the roster`);
-      process.exit(1);
-    }
   }
 }
 
@@ -110,8 +61,10 @@ function readSettings(settingsPath: string): PiSettings {
 }
 
 function main(): void {
-  const { withNames } = parseArgs(process.argv.slice(2));
-  validateWithNames(withNames);
+  if (process.argv.length > 2) {
+    console.error(`error: unknown argument: ${process.argv[2]} (usage: install.ts)`);
+    process.exit(1);
+  }
 
   const extDir = join(PI, "extensions");
   const forksDir = join(PI, "forks");
@@ -119,26 +72,11 @@ function main(): void {
   mkdirSync(forksDir, { recursive: true });
 
   const settingsPath = join(PI, "settings.json");
-  let settings = readSettings(settingsPath);
-  for (const name of withNames) {
-    const result = addPackageEntry(settings.packages, join(forksDir, name));
-    if ("error" in result) {
-      console.error(`error: --with ${name}: ${result.error}`);
-      process.exit(1);
-    }
-    settings = { ...settings, packages: result.added };
-  }
+  const settings = readSettings(settingsPath);
 
-  // What to deploy: core always, plus opt-ins the user already enabled or
-  // passed explicitly. What is stale: previously deployed but no longer —
-  // either dropped from the roster or an opt-in since disabled.
-  const deployOptIns = new Set(withNames);
-  for (const name of enabledForks(settings, forksDir)) {
-    if (OPT_IN_NAMES.has(name)) deployOptIns.add(name);
-  }
-  const deployList = ROSTER.filter(
-    (entry) => entry.tier === "core" || deployOptIns.has(entry.name),
-  ).map((entry) => entry.name);
+  // What to deploy: everything in the roster, every run. What is stale:
+  // previously deployed but since dropped from the roster.
+  const deployList = [...ROSTER];
   const deployNames = new Set(deployList);
   const oldManifest = loadManifest(join(PI, MANIFEST_FILENAME));
   const stale =

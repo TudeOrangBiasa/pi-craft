@@ -14,8 +14,6 @@ export interface MergeOptions {
   readonly exists: (path: string) => boolean;
 }
 
-export type AddEntryResult = { added: unknown[] } | { error: string };
-
 // Forks package a settings entry points at, or undefined when the entry is
 // not under forksDir. Anything outside forksDir is never installer-owned.
 export function forkNameFromEntry(entry: string, forksDir: string): string | undefined {
@@ -23,19 +21,6 @@ export function forkNameFromEntry(entry: string, forksDir: string): string | und
   if (rest === undefined || rest === "") return undefined;
   const end = rest.indexOf(sep);
   return end === -1 ? rest : rest.slice(0, end);
-}
-
-// Forks packages the user's settings already enable. Only the packages key
-// counts — that is the key Pi reads for fork dirs.
-export function enabledForks(settings: PiSettings, forksDir: string): Set<string> {
-  const enabled = new Set<string>();
-  if (!Array.isArray(settings.packages)) return enabled;
-  for (const entry of settings.packages) {
-    if (typeof entry !== "string") continue;
-    const name = forkNameFromEntry(entry, forksDir);
-    if (name !== undefined) enabled.add(name);
-  }
-  return enabled;
 }
 
 // Merge + prune for settings.json. Removes only stale manifest-owned entries
@@ -65,17 +50,4 @@ export function mergeSettings(settings: PiSettings, opts: MergeOptions): PiSetti
     extensions = kept;
   }
   return { ...settings, packages, extensions };
-}
-
-// Append a forks entry to the packages key. Missing key is created; a
-// present-but-not-array key is refused rather than clobbered.
-export function addPackageEntry(packages: unknown, entry: string): AddEntryResult {
-  if (packages === undefined) return { added: [entry] };
-  if (!Array.isArray(packages)) {
-    return {
-      error:
-        "settings.json `packages` is not an array — refusing to modify it; fix by hand and re-run",
-    };
-  }
-  return { added: packages.includes(entry) ? [...packages] : [...packages, entry] };
 }

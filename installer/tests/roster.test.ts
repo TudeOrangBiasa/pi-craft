@@ -11,14 +11,20 @@ describe("roster", () => {
     "utf-8",
   );
 
-  test("roster covers every vendored REGISTRY.md entry with matching tier", () => {
-    const names = ROSTER.map((entry) => entry.name);
-    expect(new Set(names).size).toBe(names.length);
-    expect(ROSTER.filter((entry) => entry.tier === "core")).toHaveLength(7);
-    expect(ROSTER.filter((entry) => entry.tier === "opt-in")).toEqual([]);
-    for (const entry of ROSTER) {
-      expect(registry).toContain(`| \`${entry.name}\` |`);
-      expect(registry).toContain(`| ${entry.tier} |`);
+  test("roster covers every vendored REGISTRY.md entry", () => {
+    expect(new Set(ROSTER).size).toBe(ROSTER.length);
+    expect([...ROSTER]).toEqual([
+      "tool-repair",
+      "hashline",
+      "subagents",
+      "fff",
+      "safety-net",
+      "ask",
+      "todo",
+    ]);
+    for (const name of ROSTER) {
+      expect(registry).toContain(`| \`${name}\` |`);
+      expect(registry).toContain("| core |");
     }
   });
 });
