@@ -300,7 +300,7 @@ export function buildItemsForQuestion(question: QuestionData): WrappingSelectIte
 
 export const DEFAULT_PROMPT_SNIPPET = `Ask the user up to ${MAX_QUESTIONS} structured questions (${MIN_OPTIONS}-${MAX_OPTIONS} options each) when requirements are ambiguous`;
 export const DEFAULT_PROMPT_GUIDELINES: string[] = [
-  `ask_user_question: use when blocked on concrete user decisions; one invocation per need — never stack calls back-to-back.`,
+  `ask_user_question: use when blocked on concrete user decisions; one invocation per need, never stack calls back-to-back.`,
   `ask_user_question: put a recommendation first with "(Recommended)"; never author "Other"/"Type something" rows (reserved labels are rejected at runtime).`,
 ];
 
