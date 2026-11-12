@@ -1,6 +1,6 @@
 # pi-craft
 
-This is a config for Pi (`pi-coding-agent` by earendil-works). It is tested. It contains owned extensions, vendored packages, guidance rules, agents, and a system prompt append. It installs into any Pi home.
+This is a config for Pi (`pi-coding-agent` by earendil-works). It is tested. It contains owned extensions, vendored packages, agents, and a system prompt append. It installs into any Pi home.
 
 ## Use
 
@@ -17,7 +17,6 @@ Restart Pi to load the new files.
 
 - `extensions/bash-interceptor`, `extensions/governor`. These are owned extensions. They are tested with `bun run check`.
 - `extensions/<name>`. These are vendored packages. See `extensions/REGISTRY.md`. LICENSE files retain original copyright.
-- `guidance/`. These are TypeScript, Go, and Rust rules. The installer injects them automatically.
 - `installer/`. This is the roster, the manifest code, and the tests.
 - `agents/`, `prompt/APPEND_SYSTEM.md`. These are reviewer agents and the system-prompt append.
 - `CHANGELOG.md`. It lists changes per release and upgrade steps.

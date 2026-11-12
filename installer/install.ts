@@ -135,17 +135,10 @@ function main(): void {
   // removed extension, never manifest-owned, so stale-prune can't reach it.
   rmSync(join(extDir, "pi-rtk-optimizer"), { recursive: true, force: true });
 
-  // 4. Agents, guidance corpus, system prompt (auto-discovered).
-  for (const dir of ["agents", "guidance"]) {
-    const src = join(REPO, dir);
-    if (!existsSync(src)) {
-      console.error(`missing source dir: ${src}`);
-      process.exit(1);
-    }
-    copyTree(src, join(PI, dir));
-  }
+  // 4. Agents and system prompt.
+  copyTree(join(REPO, "agents"), join(PI, "agents"));
   copyFileSync(join(REPO, "prompt", "APPEND_SYSTEM.md"), join(PI, "APPEND_SYSTEM.md"));
-  console.log("installed agents/, guidance/, APPEND_SYSTEM.md");
+  console.log("installed agents/, APPEND_SYSTEM.md");
 
   // 5. Merge settings (prune stale, preserve user entries + order).
   if (settings.extensions !== undefined && !Array.isArray(settings.extensions)) {
