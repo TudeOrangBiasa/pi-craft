@@ -115,7 +115,6 @@ export interface UndoRecord {
 
 let cachedDb: { path: string; db: RawDb; stmts: Prepared } | null = null;
 let opening: { path: string; promise: Promise<HashStore> } | null = null;
-let exitHandlerRegistered = false;
 
 function openDb(storePath: string): { db: RawDb; stmts: Prepared } {
   const db = openDbFn(storePath);
@@ -309,16 +308,6 @@ async function openStore(storePath: string): Promise<HashStore> {
   }
   cachedDb = { path: storePath, db, stmts };
 
-  if (!exitHandlerRegistered) {
-    exitHandlerRegistered = true;
-    process.once("exit", () => shutdownHashStore());
-    for (const sig of ["SIGINT", "SIGTERM"] as const) {
-      process.once(sig, () => {
-        shutdownHashStore();
-        process.kill(process.pid, sig);
-      });
-    }
-  }
 
   return { stmts, engine: sqliteEngine };
 }

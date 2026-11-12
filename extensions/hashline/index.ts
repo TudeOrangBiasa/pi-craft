@@ -14,7 +14,7 @@ import {
   toggleAutoRead,
   toggleAnchorGrep,
 } from "./src/config";
-import { loadHashStore, pruneMissing } from "./src/hash-store";
+import { loadHashStore, pruneMissing, shutdownHashStore } from "./src/hash-store";
 import { recordServedSafe, clearServed, buildServedMap } from "./src/served";
 import { clearBoundaryBypass } from "./src/boundary-bypass";
 import { registerWriteHook } from "./src/write-hook";
@@ -62,6 +62,13 @@ export default function (pi: ExtensionAPI): void {
     if (debugValue === "1" || debugValue === "true") {
       ctx.ui.notify(`Hashline Edit mode active`, "info");
     }
+  });
+
+  // Session-scoped resource: the sqlite hash store opens on session_start
+  // (loadHashStore above) and closes here, idempotently. No process-level
+  // exit/signal hooks: the extension must not own process lifecycle.
+  pi.on("session_shutdown", async () => {
+    shutdownHashStore();
   });
 
   pi.registerCommand("toggle-auto-read", {
