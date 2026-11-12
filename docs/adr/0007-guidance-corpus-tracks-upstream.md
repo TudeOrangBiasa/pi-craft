@@ -1,6 +1,6 @@
 # ADR-0007: Guidance Corpus Tracks Upstream Builtin-Rules
 
-Status: accepted
+Status: superseded (guidance corpus removed with omfg; record kept as history)
 
 ## Context
 

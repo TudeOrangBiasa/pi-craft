@@ -1,6 +1,6 @@
 # ADR-0011: Goal Completion Gated on an Independent Read-Only Verifier
 
-Status: accepted
+Status: superseded (goal extension removed in minimal-durable trim; record kept as history)
 
 ## Context
 

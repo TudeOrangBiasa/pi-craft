@@ -1,6 +1,6 @@
 # ADR-0010: Goal Mode Owned In-Repo, Modeled on Claude Code /goal + @piex-dev/goal
 
-Status: accepted
+Status: superseded (goal extension removed in minimal-durable trim; record kept as history)
 
 ## Context
 

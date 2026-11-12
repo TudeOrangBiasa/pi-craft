@@ -311,18 +311,10 @@ export const DEFAULT_TOOL_DESCRIPTION = `Ask the user one or more structured que
 4. Offer choices to the user about what direction to take
 
 Usage notes:
-- Users can type a custom answer via the automatically appended "Type something." row on every question or press Esc to abandon the questionnaire. Do NOT author "Other" or "Type something." labels yourself — reserved labels are rejected at runtime.
-- Use multiSelect: true when multiple answers are valid. The "Type something." row is available on every question, including when options carry a \`preview\`; in preview mode it expands to the full pane width while typing so the custom answer is not cramped into the narrow options column.
+- Users can type a custom answer via the automatically appended "Type something." row or press Esc to abandon. Do NOT author "Other" or "Type something." labels yourself — reserved labels are rejected at runtime.
+- Use multiSelect: true when multiple answers are valid.
 - If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label.
-
-Preview feature:
-Use the optional \`preview\` field on options when presenting concrete artifacts that users need to visually compare:
-- ASCII mockups of UI layouts or components
-- Code snippets showing different implementations
-- Diagram variations
-- Configuration examples
-
-Preview content is rendered as markdown in a monospace box. Multi-line text with newlines is supported. When any option has a preview, the UI switches to a side-by-side layout with a vertical option list on the left and preview on the right. Do not use previews for simple preference questions where labels and descriptions suffice. Note: previews are only supported for single-select questions (not multiSelect).`;
+- Use the optional \`preview\` field for concrete artifacts (mockups, snippets, diagrams) the user needs to compare visually. Single-select only.`;
 
 export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
   const guidance = validateGuidanceFields(loadConfig().guidance);

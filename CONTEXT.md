@@ -31,5 +31,6 @@ TypeScript + Bun. Lint `oxlint`, format `oxfmt`. Monadic code style. See `CODING
 - 0004 prompt-architecture — tool guidance on tools, APPEND holds non-tool rules only
 - 0005 event-based-restraint — no timers/throttles/sample-key caches
 - 0006 writing-for-agents — levers for all agent-facing docs
-- 0007 guidance-corpus-tracks-upstream — 27 rules, scope-adapted, loader fixed
+- 0007 guidance-corpus-tracks-upstream — superseded (corpus removed with omfg)
 - 0008 no-plans-no-architecture-doc — docs as docs, source as source, context as glossary
+- 0009 remove-rtk, 0010 goal-mode + 0011 goal-verifier-gate — superseded (extensions removed in trims; records kept as history)
