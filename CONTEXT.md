@@ -16,10 +16,8 @@ TypeScript + Bun. Lint `oxlint`, format `oxfmt`. Monadic code style. See `CODING
 
 | Term | Meaning | Avoid |
 | ---- | ------- | ----- |
-| owned extension | `omfg`, `bash-interceptor`, `governor` — source of truth here, tested | — |
+| owned extension | `bash-interceptor`, `governor` — source of truth here, tested | — |
 | vendored package | Third-party extension code under `extensions/<name>/`, adapted to our roster; LICENSE retains original copyright | fork (implies upstream tracking) |
-| guidance rule | `guidance/<name>.md` with frontmatter (condition + scope); auto-injected by omfg on tool_call match, never read on demand | skill, prompt |
-| TTSR | Time Travelling Stream Rules — omfg's named stream-rule engine (gate/replace/inject over the token/tool stream) | filter |
 | anchor | `aB3`-style row handle from `read`; the only valid edit address for `replace`/`insert` | line number |
 | displacement | Removing a core tool from the active set at `session_start` because ours supersedes it | disable, hide |
 | core | The default roster: all 7 packages deploy every run, no opt-ins | — |

@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DIR_EXTENSIONS, ROSTER, SINGLE_FILE } from "./roster.js";
+import { ROSTER, SINGLE_FILE } from "./roster.js";
 import { mergeSettings } from "./settings.js";
 import type { PiSettings } from "./settings.js";
 import { loadManifest, MANIFEST_FILENAME, saveManifest } from "./manifest.js";
@@ -82,7 +82,7 @@ function main(): void {
   const stale =
     oldManifest === undefined ? [] : oldManifest.packages.filter((name) => !deployNames.has(name));
 
-  // 1. Single-file + directory extensions.
+  // 1. Single-file extensions.
   const deployedExts: string[] = [];
   for (const file of SINGLE_FILE) {
     const src = join(REPO, "extensions", file.replace(/\.ts$/, ""), file);
@@ -93,16 +93,6 @@ function main(): void {
     copyFileSync(src, join(extDir, file));
     deployedExts.push(join(extDir, file));
     console.log(`installed extension: ${file}`);
-  }
-  for (const name of DIR_EXTENSIONS) {
-    const src = join(REPO, "extensions", name);
-    const dest = join(extDir, name);
-    if (!existsSync(join(src, "package.json"))) {
-      console.error(`missing manifest for directory extension: ${src}`);
-      process.exit(1);
-    }
-    copyTree(src, dest);
-    console.log(`installed directory extension: ${name}/`);
   }
 
   // 2. Package extensions + deps.

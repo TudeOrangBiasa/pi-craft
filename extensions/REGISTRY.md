@@ -1,12 +1,11 @@
 # Extension registry
 
-Every extension in `extensions/` with owner, role, and status. Core = default roster (7 packages + 3 single-file). All core, no opt-ins.
+Every extension in `extensions/` with owner, role, and status. Core = default roster (7 packages + 2 single-file). All core, no opt-ins.
 
 ## Owned (source of truth here, tested)
 
 | Name | Role | Status |
 | ---- | ---- | ------ |
-| `omfg` | Stream rules (TTSR) + guidance injector | core |
 | `bash-interceptor` | Bash→tool steering | core |
 | `governor` | Central output bound | core |
 

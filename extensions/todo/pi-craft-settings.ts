@@ -2,7 +2,7 @@
 //
 // File: `<agentDir>/pi-craft.json` (`~/.pi/agent/pi-craft.json`, honoring
 // `PI_CODING_AGENT_DIR` like every other Pi path). Sections use the extension
-// dir name: ask, todo, subagents, hashline, tool-repair, omfg, fff.
+// dir name: ask, todo, subagents, hashline, tool-repair, fff.
 //
 // Migration: when the unified file (or a section) is missing but the
 // extension's old file exists, the old file wins for that read and its

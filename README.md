@@ -11,11 +11,11 @@ bun run install   # copies into ~/.pi/agent (respects PI_CODING_AGENT_DIR), merg
 
 Restart Pi to load the new files.
 
-`installer/roster.ts` lists the packages. It lists 7 core packages, all installed every run. It also installs the owned extensions (`omfg`, `bash-interceptor`, `governor`). It writes what it installs to a manifest file. On the next run, it removes entries that are no longer in the roster. It does not touch packages that you install. It does not touch your settings entries. A second run changes nothing.
+`installer/roster.ts` lists the packages. It lists 7 core packages, all installed every run. It also installs the owned extensions (`bash-interceptor`, `governor`). It writes what it installs to a manifest file. On the next run, it removes entries that are no longer in the roster. It does not touch packages that you install. It does not touch your settings entries. A second run changes nothing.
 
 ## Layout
 
-- `extensions/omfg`, `extensions/bash-interceptor`, `extensions/governor`. These are owned extensions. They are tested with `bun run check`.
+- `extensions/bash-interceptor`, `extensions/governor`. These are owned extensions. They are tested with `bun run check`.
 - `extensions/<name>`. These are vendored packages. See `extensions/REGISTRY.md`. LICENSE files retain original copyright.
 - `guidance/`. These are TypeScript, Go, and Rust rules. The installer injects them automatically.
 - `installer/`. This is the roster, the manifest code, and the tests.
