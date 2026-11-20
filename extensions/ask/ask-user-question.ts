@@ -59,7 +59,19 @@ function emitAskUserBlockedEvent(pi: ExtensionAPI, active: boolean): void {
   pi.events.emit(ASK_USER_BLOCKED_EVENT, payload);
 }
 
-/** Non-interactive host backstop (the reconciler normally strips the tool first). */
+/**
+ * RPC hosts (VSCode pendant, ACP clients like Zed/Paseo — issue #78) cannot
+ * render ui.custom(), but their select/input dialog sub-protocol works. Route
+ * those hosts to the sequential dialog walker up front, skipping the TUI
+ * render-graph import entirely. Older RPC builds without ctx.mode fall
+ * through to the custom()-resolved-undefined backstop below.
+ * See ./rpc-fallback.ts.
+ */
+function shouldUseRpcWalker(ctx: ExtensionContext, ui: DialogUI): boolean {
+  const mode = "mode" in ctx && typeof ctx.mode === "string" ? ctx.mode : undefined;
+  return mode === "rpc" && hasDialogUI(ui);
+}
+
 function rejectWithoutUi() {
   return buildToolResult(ERROR_NO_UI, { answers: [], cancelled: true, error: "no_ui" });
 }
@@ -334,13 +346,7 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
 
       emitAskUserPromptEvent(pi, typed);
 
-      // RPC hosts (VSCode pendant, ACP clients like Zed/Paseo — issue #78):
-      // ui.custom() cannot render there, but the select/input dialog
-      // sub-protocol works. Hosts that advertise ctx.mode (pi ≥0.79) route to
-      // the sequential dialog walker up front, skipping the TUI render-graph
-      // import entirely; RPC builds that predate ctx.mode are caught by the
-      // custom()-resolved-undefined backstop below. See ./rpc-fallback.ts.
-      if ((ctx as { mode?: string }).mode === "rpc" && hasDialogUI(ctx.ui)) {
+      if (shouldUseRpcWalker(ctx, ctx.ui)) {
         return runRpcPath(pi, ctx.ui, typed);
       }
 

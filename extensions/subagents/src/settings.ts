@@ -321,8 +321,8 @@ const GRACE_TURNS_CEILING = 1_000;
 const SUBAGENT_DEPTH_CEILING = 16;
 const TIMEOUT_MS_CEILING = 86_400_000;
 
-/** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
-function sanitize(raw: unknown): SubagentsSettings {
+/** Drop fields that don't match the expected shape. */
+function dropUnknownFields(raw: unknown): SubagentsSettings {
   if (!raw || typeof raw !== "object") return {};
   const r = raw as Record<string, unknown>;
   const out: SubagentsSettings = {};
@@ -460,7 +460,7 @@ function projectPath(cwd: string): string {
 function readSettingsFile(path: string): SubagentsSettings {
   if (!existsSync(path)) return {};
   try {
-    return sanitize(JSON.parse(readFileSync(path, "utf-8")));
+    return dropUnknownFields(JSON.parse(readFileSync(path, "utf-8")));
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.warn(`[pi-subagents] Ignoring malformed settings at ${path}: ${reason}`);
@@ -470,7 +470,7 @@ function readSettingsFile(path: string): SubagentsSettings {
 
 /** Load merged settings: global provides defaults, project overrides. */
 export function loadSettings(cwd: string = process.cwd()): SubagentsSettings {
-  const global = sanitize(readSection("subagents", join(getAgentDir(), "subagents.json")));
+  const global = dropUnknownFields(readSection("subagents", join(getAgentDir(), "subagents.json")));
   return { ...global, ...readSettingsFile(projectPath(cwd)) };
 }
 
