@@ -1,25 +1,11 @@
 import type { ExtensionAPI, BashToolInput } from "@earendil-works/pi-coding-agent";
 
 /**
- * Bash interceptor for pi-craft (vanilla Pi).
- *
- * Ports OMP's bashInterceptor to vanilla Pi as an extension. When the model reaches for `bash`
- * to do something a dedicated tool already does better, we block the call and steer it to the
- * right tool.
- *
- * Vanilla Pi's tool *names* vary by install and by the extensions you load. File discovery is
- * `fffind` (fff) or `find` (core); text search is `ffgrep` (fff),
- * in-place edits go to `replace` (hashline)
- * or `edit` (core). Each rule lists candidate tool names in preference order and resolves to the
- * first one actually active this session, so the block message names a tool that exists. If no
- * candidate is active, the rule silently no-ops (best-effort nudge, not a security boundary).
- *
- *   cat|head|tail|less|more              -> read
- *   grep|rg|ripgrep|ag|ack               -> ffgrep
- *   find|fd|locate (name/type/glob/...)  -> fffind | find
- *   sed -i | perl -i | awk -i inplace    -> replace | edit
- *   echo|printf|cat with redirect/herdoc -> write
- *   ls (no flags)                        -> ls
+ * Bash interceptor: when the model reaches for `bash` to do something a
+ * dedicated tool already does better, block the call and steer it there.
+ * Tool names vary by install, so each rule lists candidates in preference
+ * order; if none is active the rule silently no-ops (best-effort nudge,
+ * not a security boundary).
  */
 
 interface InterceptorRule {
@@ -31,9 +17,6 @@ interface InterceptorRule {
 
 const RULES: InterceptorRule[] = [
   {
-    // `cat` with a redirect or heredoc is a write, not a read; exclude it here so the
-    // write rule below wins. Plain `cat file` routes to read.
-    // `tail -f` / `-F` follows a log — legit bash, exempt it.
     pattern:
       /^\s*(?:cat|head|tail|less|more|tac|nl)\b(?!.*(?:[>]|<<?\s*\w))(?!.*\s-[a-zA-Z]*[fF]\b)/,
     candidates: ["read"],
@@ -54,9 +37,6 @@ const RULES: InterceptorRule[] = [
       `Use the ${tool} tool instead of find/fd/locate; it is the dedicated file-search tool.`,
   },
   {
-    // Any bare `ls` (plain, flagged, or piped) routes to read/fffind: fragment
-    // matching blocks `ls -la | grep foo` on its first fragment. Split it —
-    // list via read/fffind, then count/filter with bash only if needed.
     pattern: /^\s*ls\b(?!.*[|&;])/,
     candidates: ["read", "fffind"],
     message: (tool) =>
@@ -76,11 +56,6 @@ const RULES: InterceptorRule[] = [
   },
 ];
 
-/**
- * Split a command into runnable fragments on the common compound separators.
- * Stages that consume another command's stdout through `|` / `|&` are marked
- * `pipeConsumer` and skipped: path-based dedicated tools cannot supply their stdin.
- */
 function* fragments(command: string): Generator<{ text: string; pipeConsumer: boolean }> {
   const sep = /(\|\||\|&|\||&&|\n|;|&)/g;
   let prev = "";
@@ -100,12 +75,10 @@ function* fragments(command: string): Generator<{ text: string; pipeConsumer: bo
   }
 }
 
-/** Drop leading `NAME=value` assignments, incl. quoted values with spaces. */
 function stripAssignment(cmd: string): string {
   return cmd.replace(/^\s*(?:[A-Za-z_][\w]*=(?:"[^"]*"|'[^']*'|\S+)\s+)+/, "");
 }
 
-/** First candidate tool that is active this session, or null if none are. */
 function resolveTool(rule: InterceptorRule, toolNames: string[]): string | null {
   for (const candidate of rule.candidates) {
     if (toolNames.includes(candidate)) return candidate;
@@ -122,11 +95,6 @@ function matchRule(cmd: string, toolNames: string[]): InterceptorRule | null {
   return null;
 }
 
-/**
- * Returns the resolved tool + message for the rule that should intercept `command`,
- * or null if it should run as bash. Checks the whole command first, then
- * each flat fragment (skipping pipe-stdin consumers and leading NAME=value assignments).
- */
 export function checkInterception(
   command: string,
   toolNames: string[],

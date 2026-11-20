@@ -136,4 +136,19 @@ describe("pi-craft settings", () => {
     expect(readJsonObject(bad)).toEqual({});
     expect(readJsonObject(join(dir, "absent.json"))).toEqual({});
   });
+
+  test("vendored copies stay byte-identical", async () => {
+    const copies = [
+      "extensions/_shared/pi-craft-settings.ts",
+      "extensions/ask/pi-craft-settings.ts",
+      "extensions/todo/pi-craft-settings.ts",
+      "extensions/hashline/src/pi-craft-settings.ts",
+      "extensions/subagents/src/pi-craft-settings.ts",
+      "extensions/tool-repair/src/pi-craft-settings.ts",
+    ];
+    const bodies = copies.map((p) =>
+      readFileSync(join(import.meta.dir, "..", "..", "..", p), "utf-8"),
+    );
+    for (const body of bodies.slice(1)) expect(body).toBe(bodies[0]);
+  });
 });

@@ -1,8 +1,3 @@
-/**
- * config-io — guidance field validation for the ask_user_question tool.
- * File loading moved to pi-craft-settings (unified pi-craft.json sections).
- */
-
 export interface GuidanceFields {
   promptSnippet?: string;
   promptGuidelines?: string[];

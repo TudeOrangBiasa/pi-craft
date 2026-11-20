@@ -39,7 +39,6 @@ const MULTI_SELECT_INSTRUCTIONS =
 const CUSTOM_ANSWER_TITLE = "Type your answer:";
 const MULTI_SELECT_PLACEHOLDER = "1,3";
 
-/** Longest preview slice folded into a select title before truncation. */
 const MAX_PREVIEW_CHARS = 600;
 
 /**
@@ -53,7 +52,6 @@ export type DialogUI = {
   input: (title: string, placeholder?: string) => Promise<string | undefined>;
 };
 
-/** True when the host implements the select/input dialog primitives. */
 export function hasDialogUI(ui: unknown): ui is DialogUI {
   const u = ui as Partial<Record<"select" | "input", unknown>> | null | undefined;
   return typeof u?.select === "function" && typeof u?.input === "function";
@@ -134,7 +132,6 @@ async function askSingleSelect(
       preview: o.preview && o.preview.length > 0 ? o.preview : undefined,
     };
   }
-  // "Type something." sentinel → free-text follow-up.
   const typed = await ui.input(
     `${header}${q.question}\n\n${t("rpc.custom_answer_title", CUSTOM_ANSWER_TITLE)}`,
     "",
@@ -143,7 +140,6 @@ async function askSingleSelect(
   return { questionIndex, question: q.question, kind: "custom", answer: typed };
 }
 
-/** `undefined` means the user dismissed the dialog (cancel the questionnaire). */
 async function askMultiSelect(
   ui: DialogUI,
   q: QuestionData,

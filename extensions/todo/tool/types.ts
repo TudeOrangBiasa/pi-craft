@@ -1,20 +1,13 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "@sinclair/typebox";
 
-// ---------------------------------------------------------------------------
-// Tool / command identity: verbatim string boundaries.
-// Tool name "todo" is the persistence key for branch replay (filtering
-// `toolResult.toolName === "todo"`) AND the permissions entry at
-// `templates/pi-permissions.jsonc:26`. DO NOT rename.
-// ---------------------------------------------------------------------------
+// Tool / command identity. TOOL_NAME must stay "todo": replay.ts filters on
+// the literal (it cannot import this module without dragging typebox into
+// the test graph), and old sessions already store "todo".
 
 export const TOOL_NAME = "todo";
 export const TOOL_LABEL = "Todo";
 export const COMMAND_NAME = "todos";
-
-// ---------------------------------------------------------------------------
-// User-facing strings (kept stable for /todos UX parity).
-// ---------------------------------------------------------------------------
 
 export const ERR_REQUIRES_INTERACTIVE = "/todos requires interactive mode";
 export const MSG_NO_TODOS = "No todos yet. Ask the agent to add some!";
@@ -41,8 +34,7 @@ export interface Task {
 /**
  * Persistence + replay snapshot. Every successful `todo` tool call returns this
  * shape under `details`; `state/replay.ts` reads the latest one from the branch
- * to reconstruct module state. Field order and field names are pinned by
- * cross-version replay compatibility.
+ * to reconstruct module state. Keep field names stable: old sessions must replay.
  */
 export interface TaskDetails {
   action: TaskAction;
@@ -72,11 +64,8 @@ export interface TaskMutationParams {
   includeDeleted?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// TypeBox parameter schema: every `description` doubles as LLM-facing prompt
-// copy. Field order and wording are pinned by registration tests and the
-// pre-refactor schema at `packages/pi-todo/todo.ts:512-573`.
-// ---------------------------------------------------------------------------
+// TypeBox parameter schema. Every `description` doubles as LLM-facing prompt
+// copy: rewording one changes what the model sees.
 
 export const TodoParamsSchema = Type.Object({
   action: StringEnum(["create", "update", "list", "get", "delete", "clear"] as const),

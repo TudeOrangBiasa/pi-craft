@@ -24,14 +24,14 @@ function parseObject(parsed: unknown): Config {
   };
 }
 
-
 export async function readConfig(): Promise<Config> {
-  const section = readSection("hashline", configPath());
+  const legacy = configPath();
+  const section = readSection("hashline", legacy);
   if (Object.keys(section).length === 0) return { ...DEFAULT_CONFIG };
   try {
     return parseObject(section);
   } catch (error: unknown) {
-    console.error("Config section corrupted, using defaults:", error);
+    console.error(`Config section corrupted at ${legacy}, using defaults:`, error);
     return { ...DEFAULT_CONFIG };
   }
 }

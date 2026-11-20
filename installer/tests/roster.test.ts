@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROSTER } from "../roster.js";
 
-// Roster: the single typed deploy driver must match the REGISTRY.md contract
-// it documents (all core, no opt-ins).
 describe("roster", () => {
   const registry = readFileSync(
     join(import.meta.dir, "..", "..", "extensions", "REGISTRY.md"),

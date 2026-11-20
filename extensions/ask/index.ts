@@ -1,10 +1,7 @@
 /**
- * pi-ask-user-question — Pi extension. Registers the `ask_user_question`
+ * pi-ask-user-question: Pi extension. Registers the `ask_user_question`
  * tool: a structured option selector with an automatically appended
  * `Type something.` custom-answer row.
- *
- * Sentinel labels and TUI chrome strings use the built-in English fallbacks
- * (the optional localization SDK is not bundled with this fork).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

@@ -1,9 +1,6 @@
 /**
- * Tool Input Repair Extension
- *
- * Repairs provider-level schema poisoning and malformed assistant tool calls
- * before Pi validates them. Valid inputs pass through unchanged; attempted
- * argument repairs are committed only when they satisfy the live tool schema.
+ * Repairs apply only when they satisfy the live tool schema; valid inputs
+ * pass through unchanged.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -119,12 +116,10 @@ export default function (pi: ExtensionAPI) {
     const schemas = safeGetActiveToolSchemas(pi);
     for (const call of toolCallArguments(message)) {
       if (model && hasGrammarLeakBug(model) && stripGrammarTokenLeaksInPlace(call.args)) changed = true;
-      if (model && hasAnchorBleedBug(model)) {
-        // Scoped strip: only pattern-shaped fields per live schema (+ static
-        // fallback). Unknown tools are left untouched — fail-closed.
-        const schema = schemas.find((tool) => tool.name === call.name);
-        if (stripAnchorBleedForTool(call.args, collectPatternFields(call.name, schema?.parameters))) changed = true;
-      }
+    if (model && hasAnchorBleedBug(model)) {
+      // Unknown tools are left untouched — fail-closed.
+      const schema = schemas.find((tool) => tool.name === call.name);
+      if (stripAnchorBleedForTool(call.args, collectPatternFields(call.name, schema?.parameters))) changed = true;
     }
 
     const effectiveGrammarRepairConfig = resolveGrammarRepairForModel(grammarRepairConfig, model);

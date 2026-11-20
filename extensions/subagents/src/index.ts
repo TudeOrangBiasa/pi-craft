@@ -141,8 +141,6 @@ import {
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
 
-// ---- Shared helpers ----
-
 /** Tool execute return value for a text response. */
 function textResult(msg: string, details?: AgentDetails) {
   return { content: [{ type: "text" as const, text: msg }], details: details as any };
@@ -208,8 +206,6 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
     onSessionCreated: (session: any) => {
       state.session = session;
     },
-    // Spend is accumulated on the AgentRecord (agent-manager), which is what
-    // every surface reads; this callback exists here only to repaint on it.
     onAssistantUsage: (_usage: LifetimeUsage) => {
       onStreamUpdate?.();
     },
@@ -264,8 +260,6 @@ function formatTaskNotification(
   const compactXml = record.compactionCount
     ? `<compactions>${record.compactionCount}</compactions>`
     : "";
-  // Only under `showCost`: this is LLM context, and a figure the orchestrator
-  // did not ask for is a figure it may start reporting unprompted.
   const cost = showCost ? getLifetimeCost(record.lifetimeUsage) : 0;
   const costXml = cost > 0 ? `<estimated_cost_usd>${cost.toFixed(4)}</estimated_cost_usd>` : "";
 
@@ -341,9 +335,6 @@ function buildNotificationDetails(
     turnCount: activity?.turnCount ?? 0,
     maxTurns: activity?.maxTurns,
     totalTokens,
-    // Carried unconditionally; the renderer gates on the setting. Details are
-    // data, and a notification rendered before a mid-session toggle should not
-    // be stuck with the old answer.
     totalCost: getLifetimeCost(record.lifetimeUsage),
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
     outputFile: record.outputFile,
@@ -418,10 +409,8 @@ export default function (pi: ExtensionAPI) {
             ? "completed (steered)"
             : "completed";
 
-        // Line 1: icon + agent description + status
         let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
-        // Line 2: stats
         const parts: string[] = [];
         if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
@@ -436,7 +425,6 @@ export default function (pi: ExtensionAPI) {
             "\n  " + parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
         }
 
-        // Line 3: result preview (collapsed) or full (expanded)
         if (expanded) {
           const lines = d.resultPreview.split("\n").slice(0, 30);
           for (const l of lines) line += "\n" + theme.fg("dim", `  ${l}`);
@@ -445,7 +433,6 @@ export default function (pi: ExtensionAPI) {
           line += "\n  " + theme.fg("dim", `⎿  ${preview}`);
         }
 
-        // Line 4: output file link (if present)
         if (d.outputFile) {
           line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
         }
@@ -455,10 +442,6 @@ export default function (pi: ExtensionAPI) {
 
       const all = [d, ...(d.others ?? [])];
       const rendered = all.map(renderOne);
-      // A group of agents lands as one notification, and the number a user wants
-      // from it is what the batch cost — not four figures to add up by hand.
-      // Derived from the per-agent details rather than carried alongside them:
-      // one source, so the total can never disagree with the rows above it.
       if (showCost && all.length > 1) {
         const total = formatCost(all.reduce((sum, a) => sum + (a.totalCost ?? 0), 0));
         if (total) {
@@ -472,11 +455,8 @@ export default function (pi: ExtensionAPI) {
     },
   );
 
-  // Read directly rather than waiting for applyAndEmitLoaded below: this decides
-  // the initial load, which happens hundreds of lines before settings are applied.
   let strictAgentFiles = loadSettings(process.cwd()).strictAgentFiles === true;
 
-  /** Reload agents from project/global custom agent dirs and merge with defaults (called on init and each Agent invocation). */
   const reloadCustomAgents = (strict = false) => {
     const userAgents = loadCustomAgents(process.cwd(), strict);
     registerAgents(userAgents);
@@ -497,9 +477,7 @@ export default function (pi: ExtensionAPI) {
   }
   function setReportUsage(b: boolean): void {
     reportUsage = b;
-    // Whatever accumulated while it was on is stale the moment it goes off:
-    // draining it later would bill the parent for a window the user opted out
-    // of, in one lump, on some unrelated later tool call.
+    // Drain on disable: kept spend would bill a later, unrelated window in one lump.
     if (!b) pendingUsage.drain();
   }
   /** Show `~$X` next to token counts in the subagent surfaces. */
@@ -545,7 +523,6 @@ export default function (pi: ExtensionAPI) {
   }
   const pendingUsage = new PendingUsagePool();
 
-  // ---- Cancellable pending notifications ----
   // Holds notifications briefly so get_subagent_result can cancel them
   // before they reach pi.sendMessage (fire-and-forget).
   const pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
@@ -577,7 +554,6 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // ---- Individual nudge helper (async join mode) ----
   function emitIndividualNudge(record: AgentRecord) {
     if (record.resultConsumed) return; // re-check at send time
 

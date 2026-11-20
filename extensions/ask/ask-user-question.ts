@@ -19,8 +19,8 @@ import {
   type AskUserBlockedEventPayload,
   type AskUserPromptEventPayload,
 } from "./events.js";
-// Static import is fine — rpc-fallback pulls only types + the i18n bridge,
-// none of the ~560ms TUI render graph that QuestionnaireSession lazy-loads.
+// Static import is safe here: rpc-fallback pulls only types + the i18n
+// bridge, never the TUI render graph that QuestionnaireSession lazy-loads.
 import { type DialogUI, hasDialogUI, runRpcQuestionnaire } from "./rpc-fallback.js";
 import { displayLabel, t } from "./state/i18n-bridge.js";
 import { sentinelsToAppend } from "./state/row-intent.js";
@@ -64,7 +64,6 @@ function rejectWithoutUi() {
   return buildToolResult(ERROR_NO_UI, { answers: [], cancelled: true, error: "no_ui" });
 }
 
-/** Sequential native-dialog walker for RPC hosts; brackets it with the blocked-event pair + terminal bell. */
 async function runRpcPath(pi: ExtensionAPI, ui: DialogUI, typed: QuestionParams) {
   emitAskUserBlockedEvent(pi, true);
   try {
@@ -75,7 +74,6 @@ async function runRpcPath(pi: ExtensionAPI, ui: DialogUI, typed: QuestionParams)
   }
 }
 
-/** Canonical tool name — single source of truth shared with the reconcile module. */
 export const ASK_USER_QUESTION_TOOL_NAME = "ask_user_question";
 
 const ERROR_NO_UI = "Error: UI not available (running in non-interactive mode)";
@@ -102,12 +100,9 @@ export const BEL = "\x07";
 function emitTerminalAttention(): void {
   try {
     if (process.stdout.isTTY) process.stdout.write(BEL);
-  } catch {
-    // Terminal attention is best effort; the questionnaire must still proceed.
-  }
+  } catch {}
 }
 
-/** Delay before the background session-graph pre-warm; mirrors the workflow extension's /wf prewarm. */
 export const PREWARM_DELAY_MS = 2000;
 
 type SessionModule = typeof import("./state/questionnaire-session.js");
@@ -199,9 +194,8 @@ function registerCollapseKeyListener(
 }
 
 /**
- * Build the `ctx.ui.custom` component factory: constructs the session (capturing it in
- * `sessionRef`) and exposes its component. `editInput` keeps its two dynamic imports —
- * they must stay lazy per-invocation.
+ * editInput's dynamic imports stay lazy per-invocation: hoisting them would
+ * pay the TUI render-graph cost at extension load.
  */
 function makeSessionFactory(config: {
   ctx: ExtensionContext;
@@ -252,10 +246,9 @@ function makeSessionFactory(config: {
 }
 
 /**
- * A TUI questionnaire ALWAYS resolves a QuestionnaireResult (cancel included), so
- * `undefined` uniquely means "host cannot render", never "user declined". RPC builds
- * that predate ctx.mode land here: run the dialog walker when the host has the
- * primitives; otherwise tell the model the user never saw the questions.
+ * A TUI questionnaire ALWAYS resolves a QuestionnaireResult (cancel included),
+ * so `undefined` uniquely means the host cannot render — never "user declined".
+ * RPC builds that predate ctx.mode land here.
  */
 async function resolveUndefinedResult(ctx: ExtensionContext, typed: QuestionParams) {
   if (hasDialogUI(ctx.ui)) {
@@ -339,7 +332,6 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         });
       }
 
-      // Emit event for external listeners (e.g., notification plugins)
       emitAskUserPromptEvent(pi, typed);
 
       // RPC hosts (VSCode pendant, ACP clients like Zed/Paseo — issue #78):
@@ -356,8 +348,6 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         buildItemsForQuestion(q),
       );
 
-      // Lazy — QuestionnaireSession pulls the ~560ms view/TUI render graph;
-      // load it only when the tool runs, not at extension registration.
       const sessionLoad = await loadQuestionnaireSession();
       if (!sessionLoad.ok) {
         return buildToolResult(sessionLoad.message, {
@@ -367,10 +357,6 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         });
       }
       const { QuestionnaireSession } = sessionLoad.module;
-      // Resolve the collapse/expand key spec from config. Default is `ctrl+]`; users
-      // with non-US layouts (e.g. Latin American, where `]` is shifted) can override
-      // via the `collapseKey` config field. `resolveCollapseKey` also accepts the
-      // sentinel value `"off"` to disable the shortcut entirely.
       const collapseKey = resolveCollapseKey(loadConfig());
 
       // Capture the overlay handle so the session can call `setHidden()` when the
@@ -385,9 +371,6 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         sessionRef,
         overlayHandleRef,
       );
-      // Hiding the overlay is only reversible through the raw listener above, so
-      // the session may emit `setHidden` only when it was actually registered;
-      // otherwise collapse falls back to the visible one-line row.
       const canReopenWhileHidden = removeOverlayInputListener !== undefined;
 
       emitAskUserBlockedEvent(pi, true);

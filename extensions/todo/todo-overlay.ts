@@ -38,8 +38,6 @@ export class TodoOverlay {
   private collapsed = false;
 
   setUICtx(ctx: ExtensionUIContext): void {
-    // Identity-compare so repeat session_start handlers are idempotent;
-    // on identity change (/reload) invalidate so update() re-registers.
     if (ctx !== this.uiCtx) {
       this.uiCtx = ctx;
       this.widgetRegistered = false;
@@ -99,9 +97,6 @@ export class TodoOverlay {
 
   toggleCollapse(): void {
     this.collapsed = !this.collapsed;
-    // Forced full redraw on the collapsed↔expanded height step, mirroring the
-    // lane-dock's requestRender(shapeChanged); distinct from the non-forced
-    // requestRender() refresh paths in update()/hideCompletedTasksFromPreviousTurn().
     this.tui?.requestRender(true);
   }
 
@@ -146,8 +141,6 @@ export class TodoOverlay {
 
     const overlayState = { tasks: overlayTasks, nextId: snapshot.nextId };
     const truncate = (line: string): string => truncateToWidth(line, width, "…");
-    // One scan feeds the heading counts, the heading flags, and the layout
-    // below, so a render costs O(n) total, not one O(n) scan per selector.
     const scan = scanVisibleTasks(overlayState);
 
     const headingColor = scan.hasActive ? "accent" : "dim";
@@ -233,11 +226,8 @@ export class TodoOverlay {
   }
 
   /**
-   * Append a trailing blank line so the overlay isn't flush against the
-   * editor box. Pi's host adds a leading spacer above the widget but none
-   * below, which leaves the last "└─" row (or the "+N more" summary) glued
-   * to the input box. The empty string gives the "Todos" panel a little
-   * breathing room.
+   * Trailing blank row: Pi's host adds a leading spacer above the widget
+   * but none below, so the last row would glue to the input box without it.
    */
   private withTrailingSpacer(lines: string[]): string[] {
     if (lines.length === 0) return lines;

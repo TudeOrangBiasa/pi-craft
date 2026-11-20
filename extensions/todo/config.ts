@@ -16,8 +16,6 @@ interface TodoConfig {
   collapseKey?: string;
 }
 
-/** Default content-row budget when the config is missing or invalid. This is the prior
- *  hardcoded value, preserved as the fallback. */
 export const DEFAULT_MAX_WIDGET_LINES = 12;
 
 /** Key spec for the overlay collapse/expand shortcut, e.g. `"ctrl+shift+t"` or `"alt+o"`. */
@@ -37,8 +35,7 @@ export function loadConfig(): TodoConfig {
 }
 
 /** Content-row budget for the overlay, read fresh on every call (per-render, so
- *  no `/reload`). Mirrors warp's getHeartbeatMs minus its `=== 0` disabled
- *  sentinel: a non-number or a value below the floor of 3 falls back to the
+ *  no `/reload`). A non-number or a value below the floor of 3 falls back to the
  *  default; no ceiling. */
 export function getMaxWidgetLines(): number {
   const config = loadConfig();
@@ -76,11 +73,10 @@ const MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
 /** Validate a collapse-key spec against pi-tui's KeyId grammar (verbatim port from
  *  pi-ask-user-question). Exported for unit tests. */
 export function isValidCollapseKeySpec(spec: string): boolean {
-  // Mirror pi-tui's KeyId grammar strictly: zero or more distinct modifiers, then a
-  // base key that is a single printable character or a named special key. A loose
-  // check is not enough: pi-tui's `parseKeyId` takes the LAST `+`-part as the key
-  // and ignores unknown parts, so a typo like `ctr+]` would silently match every
-  // bare `]` keypress (and the raw terminal listener would consume them globally).
+  // Mirror pi-tui's KeyId grammar strictly: zero or more distinct modifiers,
+  // then a single printable character or a named special key. Both sides fail
+  // closed on malformed input (pi-tui's parseKeyId returns null; we fall back
+  // to the default), so keep the two grammars in sync.
   if (!spec) return false;
   if (spec.startsWith("+") || spec.endsWith("+") || spec.includes("++")) return false;
   const parts = spec.split("+");

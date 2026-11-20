@@ -85,8 +85,8 @@ export function normalizeReplayedState(tasks: Task[], nextId: number): TaskState
 
 /**
  * Walk the current branch in chronological order; the LAST `toolResult` whose
- * `toolName` is "todo" and whose `details` matches TaskDetails wins
- * (last write wins). When no matching entry exists, returns EMPTY_STATE.
+ * `toolName` matches the registered tool and whose `details` matches TaskDetails
+ * wins (last write wins). When no matching entry exists, returns EMPTY_STATE.
  *
  * Pure over module state: index.ts writes the returned snapshot into the
  * store after this returns. This function never touches the store cell.
@@ -106,6 +106,9 @@ export function replayFromBranch(ctx: {
     };
     if (e.type !== "message") continue;
     const msg = e.message;
+    // Literal "todo" on purpose, not the TOOL_NAME constant: importing
+    // tool/types.js would pull typebox + pi-ai into the runtime graph,
+    // which repo tests cannot resolve. Keep in sync with TOOL_NAME.
     if (msg?.role !== "toolResult" || msg.toolName !== "todo") continue;
     if (!isTaskDetails(msg.details)) continue;
     winner = msg.details;

@@ -20,7 +20,4 @@ Every extension in `extensions/` with owner, role, and status. Core = default ro
 | `safety-net` | Destructive-command guard | core |
 | `ask` | Structured questions | core |
 | `todo` | Todo overlay + reminder | core |
-> `safety-net` ships only a prebuilt `dist/` bundle (no source vendored) — its
-> entry point is `./dist/pi/index.js`. Do not prune it; re-vendor or drop the
-> package deliberately if it ever goes stale.
-
+> `safety-net` ships only a prebuilt `dist/` bundle (entry point `./dist/pi/index.js`).

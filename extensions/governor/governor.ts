@@ -25,7 +25,6 @@ export interface BoundResult {
 /** Bound one text block. Never returns partial lines. */
 export function boundText(text: string, mode: TailMode): BoundResult {
   const raw = text.split("\n");
-  // A trailing newline is a terminator, not an extra line ("a\n" is 1 line).
   if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
   const lines = raw;
   const totalLines = lines.length;

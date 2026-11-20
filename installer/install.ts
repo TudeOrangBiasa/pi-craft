@@ -15,14 +15,6 @@ import { mergeSettings } from "./settings.js";
 import type { PiSettings } from "./settings.js";
 import { loadManifest, MANIFEST_FILENAME, saveManifest } from "./manifest.js";
 
-// Plugin-based installer for the pi-craft Pi config.
-// Layout: extensions/<name>/ = source of truth for EVERY extension.
-// Roster-driven: ROSTER (installer/roster.ts, matching extensions/REGISTRY.md)
-// is the single deploy driver. Everything deploys, every run. An
-// installer-owned manifest in the Pi home tracks what was deployed; re-runs
-// prune stale manifest-owned packages from forks/ and settings.json. Entries
-// not in the manifest (user-installed) are never touched.
-
 const REPO = join(dirname(new URL(import.meta.url).pathname), "..");
 const PI =
   process.env.PI_CODING_AGENT_DIR?.trim() !== "" && process.env.PI_CODING_AGENT_DIR !== undefined
@@ -42,7 +34,7 @@ function copyTree(src: string, dest: string): void {
 
 function failSettings(settingsPath: string): never {
   console.error(
-    `error: cannot parse ${settingsPath} — refusing to modify it; fix by hand and re-run`,
+    `error: cannot parse ${settingsPath}, refusing to modify it; fix by hand and re-run`,
   );
   process.exit(1);
 }
@@ -74,15 +66,13 @@ function main(): void {
   const settingsPath = join(PI, "settings.json");
   const settings = readSettings(settingsPath);
 
-  // What to deploy: everything in the roster, every run. What is stale:
-  // previously deployed but since dropped from the roster.
+  // Deploy everything in the roster; stale = previously deployed but since dropped.
   const deployList = [...ROSTER];
   const deployNames = new Set(deployList);
   const oldManifest = loadManifest(join(PI, MANIFEST_FILENAME));
   const stale =
     oldManifest === undefined ? [] : oldManifest.packages.filter((name) => !deployNames.has(name));
 
-  // 1. Single-file extensions.
   const deployedExts: string[] = [];
   for (const file of SINGLE_FILE) {
     const src = join(REPO, "extensions", file.replace(/\.ts$/, ""), file);
@@ -95,7 +85,6 @@ function main(): void {
     console.log(`installed extension: ${file}`);
   }
 
-  // 2. Package extensions + deps.
   for (const name of deployList) {
     const src = join(REPO, "extensions", name);
     if (!existsSync(src)) {
@@ -120,13 +109,12 @@ function main(): void {
         process.exit(1);
       }
       if (r.exitCode !== 0) {
-        console.warn(`warning: bun install failed in ${dest} — keeping existing node_modules`);
+        console.warn(`warning: bun install failed in ${dest}, keeping existing node_modules`);
       }
     }
     console.log(`installed package: ${name}`);
   }
 
-  // 3. Prune stale manifest-owned packages.
   for (const name of stale) {
     rmSync(join(forksDir, name), { recursive: true, force: true });
     console.log(`removed package: ${name}`);
@@ -135,14 +123,12 @@ function main(): void {
   // removed extension, never manifest-owned, so stale-prune can't reach it.
   rmSync(join(extDir, "pi-rtk-optimizer"), { recursive: true, force: true });
 
-  // 4. Agents and system prompt.
   copyTree(join(REPO, "agents"), join(PI, "agents"));
   copyFileSync(join(REPO, "prompt", "APPEND_SYSTEM.md"), join(PI, "APPEND_SYSTEM.md"));
   console.log("installed agents/, APPEND_SYSTEM.md");
 
-  // 5. Merge settings (prune stale, preserve user entries + order).
   if (settings.extensions !== undefined && !Array.isArray(settings.extensions)) {
-    console.warn("warning: settings.json `extensions` is not an array — leaving it untouched");
+    console.warn("warning: settings.json `extensions` is not an array, leaving it untouched");
   }
   const merged = mergeSettings(settings, {
     deployedExtPaths: deployedExts,
@@ -154,9 +140,8 @@ function main(): void {
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + "\n");
   console.log(`merged settings.json (Pi home: ${PI})`);
 
-  // 6. Record what was deployed.
   saveManifest(join(PI, MANIFEST_FILENAME), deployList);
-  console.log("done — restart Pi to load.");
+  console.log("done: restart Pi to load.");
 }
 
 main();

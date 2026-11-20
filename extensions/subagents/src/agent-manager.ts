@@ -283,9 +283,7 @@ async function shutdownChildSession(session: AgentSession | undefined): Promise<
   // Always, even on timeout: disposal is what this function ultimately exists to do.
   try {
     session?.dispose?.();
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 }
 
 export class AgentManager {
@@ -350,7 +348,6 @@ export class AgentManager {
     this.onCompact = onCompact;
     this.onUsage = onUsage;
     this.maxConcurrent = maxConcurrent;
-    // Cleanup completed agents after 10 minutes (but keep sessions for resume)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
     this.cleanupInterval.unref();
   }
@@ -1106,10 +1103,15 @@ export class AgentManager {
       const reopen = options?.reopen;
       if (!reopen || !record.sessionFile) return undefined;
       try {
-        record.session = await openPersistedChildSession(reopen.ctx, record.type, record.sessionFile, {
-          pi: reopen.pi,
-          agentId: record.id,
-        });
+        record.session = await openPersistedChildSession(
+          reopen.ctx,
+          record.type,
+          record.sessionFile,
+          {
+            pi: reopen.pi,
+            agentId: record.id,
+          },
+        );
       } catch (err) {
         // The file is gone or unparsable: report the resume as failed, with
         // the partial output intact — never an empty success.

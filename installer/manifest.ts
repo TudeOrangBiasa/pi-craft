@@ -1,8 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
-// Installer-owned record of what was deployed to the Pi home. Read before
-// and written after every deploy; drives stale-package pruning. Never
-// contains user-installed names.
+// Installer-owned record of what was deployed. Missing or malformed manifests
+// mean "nothing installer-owned": warn and prune nothing rather than guessing.
 export const MANIFEST_FILENAME = "installer-manifest.json";
 
 export interface InstallerManifest {
@@ -20,8 +19,6 @@ function isManifest(value: unknown): value is { version: 1; packages: string[] }
   );
 }
 
-// Missing or malformed manifests mean "nothing installer-owned": warn and
-// prune nothing rather than guessing.
 export function loadManifest(manifestPath: string): InstallerManifest | undefined {
   if (!existsSync(manifestPath)) return undefined;
   let parsed: unknown;

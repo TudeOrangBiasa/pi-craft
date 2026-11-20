@@ -314,9 +314,7 @@ const VALID_VIEWER_MARKDOWN_MODES: ReadonlySet<string> = new Set<ViewerMarkdownM
 ]);
 const VALID_AGENT_MENTION_MODES: ReadonlySet<string> = new Set<string>(["model", "direct", "off"]);
 
-// Sanity ceilings — prevent hand-edited configs from asking for values that
-// make no operational sense (e.g. 1e6 concurrent subagents). Permissive enough
-// that any realistic power-user setting passes through.
+// Ceilings cap hand-edited values at the absurd; ordinary settings pass through.
 const MAX_CONCURRENT_CEILING = 1024;
 const MAX_TURNS_CEILING = 10_000;
 const GRACE_TURNS_CEILING = 1_000;
@@ -335,8 +333,7 @@ function sanitize(raw: unknown): SubagentsSettings {
   ) {
     out.maxConcurrent = r.maxConcurrent as number;
   }
-  // Floor 0, not 1 like maxConcurrent above: 0 is the documented "unlimited"
-  // value and the default, so dropping it would silently be unrepresentable.
+
   if (
     Number.isInteger(r.maxConcurrentForeground) &&
     (r.maxConcurrentForeground as number) >= 0 &&

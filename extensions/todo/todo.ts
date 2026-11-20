@@ -1,15 +1,6 @@
 /**
- * todo tool plus /todos command: thin registration shell.
- *
- * Tool/command identity, schema, types, reducer, store, replay, response
- * envelope, selectors, and view formatters live in the layered modules under
- * `tool/`, `state/`, and `view/`. This file is the package-root registration
- * surface, mirroring how rpiv-ask-user-question keeps its tool registration
- * at the package root.
- *
- * Public re-exports below preserve the pre-refactor import surface so that
- * `index.ts`, `todo-overlay.ts`, and the global `test/setup.ts` `beforeEach`
- * continue to import from `./todo.js`.
+ * pi-todo: Pi extension. Registers the `todo` tool, `/todos` slash
+ * command, and the persistent TodoOverlay widget.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -30,16 +21,9 @@ import {
 } from "./tool/types.js";
 import { formatCommandTaskLine, renderTodoCall, renderTodoResult } from "./view/format.js";
 
-// English fallbacks for localized /todos section headers. The box-drawing
-// decoration is part of the localized string so translators can adjust spacing.
 const SECTION_PENDING = "── Pending ──";
 const SECTION_IN_PROGRESS = "── In Progress ──";
 const SECTION_COMPLETED = "── Completed ──";
-
-// ---------------------------------------------------------------------------
-// Public re-exports: pre-refactor consumers (overlay, tests, index.ts) keep
-// importing from `./todo.js`. New code may opt into deeper imports.
-// ---------------------------------------------------------------------------
 
 export { isTransitionValid } from "./state/invariants.js";
 export { applyTaskMutation } from "./state/state-reducer.js";
@@ -47,10 +31,6 @@ export { __resetState, getNextId, getTodos, setActiveRenderSession, sid } from "
 export { collectBlockers, deriveBlocks, detectCycle } from "./state/task-graph.js";
 export type { Task, TaskAction, TaskDetails, TaskStatus } from "./tool/types.js";
 export { TOOL_NAME } from "./tool/types.js";
-
-// ---------------------------------------------------------------------------
-// Tool registration
-// ---------------------------------------------------------------------------
 
 export const DEFAULT_PROMPT_SNIPPET = "Manage a task list to track multi-step progress";
 export const DEFAULT_PROMPT_GUIDELINES: string[] = [
@@ -98,10 +78,6 @@ export function registerTodoTool(pi: ExtensionAPI): void {
   });
 }
 
-// ---------------------------------------------------------------------------
-// /todos slash command
-// ---------------------------------------------------------------------------
-
 export function registerTodosCommand(pi: ExtensionAPI): void {
   pi.registerCommand(COMMAND_NAME, {
     description: "Show all todos on the current branch, grouped by status",
@@ -111,8 +87,6 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
         return;
       }
       const state = getState(sid(ctx));
-      // One scan feeds the empty check, the groups, and the header counts,
-      // so the command costs O(n) total, not one scan per selector.
       const scan = scanVisibleTasks(state);
       if (scan.total === 0) {
         ctx.ui.notify(t("command.no_todos", MSG_NO_TODOS), "info");

@@ -5,9 +5,6 @@
  * TUI chrome strings resolve at render time via the i18n bridge, which uses
  * canonical-English fallbacks. This fork bundles no external i18n SDK, so
  * `t(key, fallback)` returns the inline English literal at every call site.
- *
- * Extracted from rpiv-pi@7525a5d. Tool name "todo" and widget key "pi-todos"
- * (renamed from upstream "rpiv-todos"; pre-fork session history does not replay).
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
@@ -26,59 +23,13 @@ import {
 import { registerTodosCommand, registerTodoTool, TOOL_NAME } from "./todo.js";
 import type { TodoOverlay } from "./todo-overlay.js";
 import { reminderText, shouldRemind } from "./src/reminder.js";
+import {
+  isStaleOverlayModuleError,
+  makeTodoOverlayLoader,
+  type TodoOverlayImporter,
+} from "./src/overlay-loader.js";
 
-/** Delay the overlay graph pre-warm until Pi's startup work has settled. */
 export const PREWARM_DELAY_MS = 2000;
-
-type TodoOverlayModule = typeof import("./todo-overlay.js");
-type TodoOverlayImporter = () => Promise<TodoOverlayModule>;
-
-/**
- * Marker shared by the loader's poisoned-namespace error and the
- * `isStaleOverlayModuleError` predicate that lets handlers re-throw it while
- * swallowing transient load failures.
- */
-const STALE_OVERLAY_MESSAGE = "Todo overlay module cache is stale; restart Pi";
-
-/** True for the loader's latched poisoned-namespace error (see below). */
-export function isStaleOverlayModuleError(e: unknown): boolean {
-  return String(e).includes(STALE_OVERLAY_MESSAGE);
-}
-
-/**
- * Memoize the overlay graph after a successful load, but drop a rejected
- * promise so a failed pre-warm does not permanently replay the same rejection.
- * The export guard turns jiti's poisoned-namespace failure into a useful restart
- * error instead of a bare "TodoOverlay is not a constructor" TypeError.
- */
-export function makeTodoOverlayLoader(
-  importOverlay: TodoOverlayImporter = () => import("./todo-overlay.js"),
-): TodoOverlayImporter {
-  let memo: Promise<TodoOverlayModule> | undefined;
-
-  return async (): Promise<TodoOverlayModule> => {
-    memo ??= importOverlay();
-    const current = memo;
-    let mod: TodoOverlayModule;
-    try {
-      mod = await current;
-    } catch (error) {
-      // Clear only OUR rejected promise: a late catch from a concurrent
-      // awaiter must never clobber a fresh retry another caller installed.
-      if (memo === current) memo = undefined;
-      throw error;
-    }
-    if (typeof mod.TodoOverlay !== "function") {
-      // Deliberately latched: the memo keeps this resolved-but-poisoned
-      // namespace, so every subsequent load re-throws instead of retrying.
-      // Re-importing would hand back the same cached jiti namespace, so a
-      // retry can never heal this; only the restart the error asks for can.
-      const keys = JSON.stringify(Object.keys(mod));
-      throw new Error(`${STALE_OVERLAY_MESSAGE} (resolved namespace keys: ${keys})`);
-    }
-    return mod;
-  };
-}
 
 // pi-core's ExtensionRunner throws this exact phrase from an invalidated ctx
 // proxy after session replacement/reload. Match the stable substring so genuine
@@ -87,13 +38,6 @@ function isStaleCtxError(e: unknown): boolean {
   return /stale after session replacement/.test(String(e));
 }
 
-/**
- * Render a caught `unknown` as a human-readable message. This collapses the
- * `instanceof Error` dance to one place. Local copy of the `formatError` in
- * packages/rpiv-workflow/internal-utils.ts:56-58 (that module disclaims its
- * public surface, so the cross-package import is not available). M2 boundary
- * duplication: tracked as a documented-constant seam.
- */
 function formatError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

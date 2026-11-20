@@ -15,7 +15,7 @@ export interface AskUserQuestionConfig {
   /**
    * Key spec for the collapse/expand shortcut, in the same format as pi-coding-agent
    * keybinding ids (`modifier+key`, e.g. `ctrl+]`, `alt+o`, `ctrl+shift+h`). Defaults
-   * to `"ctrl+]"`. Set this to a key that is reachable on your keyboard layout — Latin
+   * to `"ctrl+]"`. Set this to a key that is reachable on your keyboard layout. Latin
    * American layouts (where `]` is on the shifted layer) often want `"ctrl+}"` instead.
    * Pass `"off"` to disable the collapse shortcut entirely.
    */
@@ -49,11 +49,10 @@ const SPECIAL_KEYS = new Set([
 const MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
 
 function isValidCollapseKeySpec(spec: string): boolean {
-  // Mirror pi-tui's KeyId grammar strictly: zero or more distinct modifiers, then a
-  // base key that is a single printable character or a named special key. A loose
-  // check is not enough — pi-tui's `parseKeyId` takes the LAST `+`-part as the key
-  // and ignores unknown parts, so a typo like `ctr+]` would silently match every
-  // bare `]` keypress (and the raw terminal listener would consume them globally).
+  // Mirror pi-tui's KeyId grammar strictly: zero or more distinct modifiers,
+  // then a single printable character or a named special key. Both sides fail
+  // closed on malformed input (pi-tui's parseKeyId returns null; we fall back
+  // to the default), so keep the two grammars in sync.
   if (!spec) return false;
   if (spec.startsWith("+") || spec.endsWith("+") || spec.includes("++")) return false;
   const parts = spec.split("+");
@@ -75,8 +74,6 @@ export function resolveCollapseKey(
   return isValidCollapseKeySpec(raw) ? raw : DEFAULT_COLLAPSE_KEY;
 }
 
-// The only compound-word names in SPECIAL_KEYS — first-letter capitalization
-// alone would render them "Pageup"/"Pagedown".
 const COMPOUND_KEY_DISPLAY: Record<string, string> = {
   pageup: "PageUp",
   pagedown: "PageDown",
@@ -85,7 +82,7 @@ const COMPOUND_KEY_DISPLAY: Record<string, string> = {
 /**
  * Pretty-print a resolved key spec for UI copy: each `+`-part gets its first
  * character uppercased (`"ctrl+]"` → `"Ctrl+]"`, `"alt+o"` → `"Alt+O"`,
- * `"f9"` → `"F9"`, `"ctrl+pagedown"` → `"Ctrl+PageDown"`). Display-only — key
+ * `"f9"` → `"F9"`, `"ctrl+pagedown"` → `"Ctrl+PageDown"`). Display-only: key
  * matching always uses the raw lowercase spec (`matchesKey` lowercases ids),
  * so never feed the result back into it.
  */

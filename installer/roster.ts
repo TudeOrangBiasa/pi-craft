@@ -1,6 +1,5 @@
 // Single deploy driver for the installer: every package shipped to forks/.
-// Must match the Vendored table in extensions/REGISTRY.md. All core, no
-// opt-ins: deploy everything, every run.
+// All core, no opt-ins: deploy everything, every run.
 export const ROSTER: readonly string[] = [
   "tool-repair",
   "hashline",

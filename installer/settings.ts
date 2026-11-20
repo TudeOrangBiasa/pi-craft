@@ -14,8 +14,6 @@ export interface MergeOptions {
   readonly exists: (path: string) => boolean;
 }
 
-// Forks package a settings entry points at, or undefined when the entry is
-// not under forksDir. Anything outside forksDir is never installer-owned.
 export function forkNameFromEntry(entry: string, forksDir: string): string | undefined {
   const rest = entry.startsWith(forksDir + sep) ? entry.slice(forksDir.length + 1) : undefined;
   if (rest === undefined || rest === "") return undefined;
@@ -23,11 +21,6 @@ export function forkNameFromEntry(entry: string, forksDir: string): string | und
   return end === -1 ? rest : rest.slice(0, end);
 }
 
-// Merge + prune for settings.json. Removes only stale manifest-owned entries
-// (both keys) and dead paths under the managed extensions dir; every other
-// entry — non-strings, live user entries, even missing user paths — passes
-// through in order. A missing extensions key is created; a present-but-
-// not-array key of either kind is preserved untouched.
 export function mergeSettings(settings: PiSettings, opts: MergeOptions): PiSettings {
   const packages = Array.isArray(settings.packages)
     ? settings.packages.filter((entry) => {

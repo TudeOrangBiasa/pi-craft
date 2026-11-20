@@ -14,7 +14,8 @@
 // vendored copies: this module is dependency-free (node stdlib only) by
 // design. Each package extension vendors a copy under its own tree because
 // Pi loads forks/ packages in isolation; there is no shared import path.
-// Keep copies in sync by hand (see the header note in each copy).
+// extensions/_shared/tests/pi-craft-settings.test.ts asserts all copies
+// stay byte-identical.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
